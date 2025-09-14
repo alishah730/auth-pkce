@@ -1,0 +1,47 @@
+# Source files
+src/
+*.ts
+!dist/**/*.d.ts
+
+# Development files
+.github/
+.vscode/
+.idea/
+*.log
+*.tgz
+
+# Test files
+__tests__/
+*.test.ts
+*.spec.ts
+coverage/
+jest.config.js
+
+# Development dependencies
+.eslintrc.js
+tsconfig.json
+nodemon.json
+
+# Documentation (keep README, LICENSE, CHANGELOG)
+CONTRIBUTING.md
+FUTURE_ENHANCEMENTS.md
+PRD.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
