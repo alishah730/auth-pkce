@@ -84,7 +84,7 @@ export class ConfigManager {
         name: 'baseUrl',
         message: 'Enter the OAuth provider base URL:',
         default: baseUrl || this.config?.baseUrl,
-        validate: (input: string) => {
+        validate: (input: string): string | boolean => {
           try {
             new URL(input);
             return true;
@@ -105,7 +105,7 @@ export class ConfigManager {
         name: 'redirectUri',
         message: 'Enter the redirect URI:',
         default: this.config?.redirectUri || 'http://localhost:8080/callback',
-        validate: (input: string) => {
+        validate: (input: string): string | boolean => {
           try {
             new URL(input);
             return true;
