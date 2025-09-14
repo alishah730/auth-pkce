@@ -331,14 +331,14 @@ While auth-pkce is not formally certified, it follows security practices aligned
 
 ### Reporting Security Issues
 
-**For security vulnerabilities:**
+**Report Security Issues:**
 - Email: security@auth-pkce.dev
 - Use GitHub Security Advisories for responsible disclosure
 - Include detailed reproduction steps
 - Allow 90 days for fix before public disclosure
 
 **For security questions:**
-- Use GitHub Discussions with "security" tag
+- Use GitHub Discussions with "security" tag at https://github.com/alishah730/auth-pkce/discussions
 - Check existing documentation first
 - Provide context about your use case
 

@@ -32,7 +32,7 @@ This project and everyone participating in it is governed by our Code of Conduct
 1. **Fork the repository**
    ```bash
    # Click the "Fork" button on GitHub, then clone your fork
-   git clone https://github.com/yourusername/auth-pkce.git
+   git clone https://github.com/alishah730/auth-pkce.git
    cd auth-pkce
    ```
 
@@ -262,8 +262,8 @@ describe('Feature Name', () => {
 
 ### Getting Help
 
-- 💬 [GitHub Discussions](https://github.com/yourusername/auth-pkce/discussions) - General questions and discussions
-- 🐛 [GitHub Issues](https://github.com/yourusername/auth-pkce/issues) - Bug reports and feature requests
+- 💬 [GitHub Discussions](https://github.com/alishah730/auth-pkce/discussions) - General questions and discussions
+- 🐛 [GitHub Issues](https://github.com/alishah730/auth-pkce/issues) - Bug reports and feature requests
 - 📧 Email: support@auth-pkce.dev
 
 ### Communication Guidelines
@@ -285,7 +285,7 @@ Contributors will be recognized in:
 
 Don't hesitate to ask questions! We're here to help:
 
-- Open a [Discussion](https://github.com/yourusername/auth-pkce/discussions)
+- Open a [Discussion](https://github.com/alishah730/auth-pkce/discussions)
 - Comment on relevant issues
 - Reach out to maintainers
 

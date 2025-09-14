@@ -186,7 +186,7 @@ This tool implements the OAuth 2.0 Authorization Code Flow with PKCE as specifie
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/auth-pkce.git
+git clone https://github.com/alishah730/auth-pkce.git
 cd auth-pkce
 
 # Install dependencies
@@ -318,10 +318,31 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- 📚 [Documentation](https://github.com/yourusername/auth-pkce/wiki)
-- 🐛 [Issue Tracker](https://github.com/yourusername/auth-pkce/issues)
-- 💬 [Discussions](https://github.com/yourusername/auth-pkce/discussions)
+- 📚 [Documentation](https://github.com/alishah730/auth-pkce/wiki)
+- 🐛 [Issue Tracker](https://github.com/alishah730/auth-pkce/issues)
+- 💬 [Discussions](https://github.com/alishah730/auth-pkce/discussions)
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
+
+[⭐ Star us on GitHub](https://github.com/alishah730/auth-pkce) • [🐛 Report Issues](https://github.com/alishah730/auth-pkce/issues) • [💬 Join Discussions](https://github.com/alishah730/auth-pkce/discussions)
+
+[![npm version](https://badge.fury.io/js/auth-pkce.svg)](https://badge.fury.io/js/auth-pkce)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js CI](https://github.com/alishah730/auth-pkce/workflows/Node.js%20CI/badge.svg)](https://github.com/alishah730/auth-pkce/actions)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![OAuth 2.0](https://img.shields.io/badge/OAuth%202.0-PKCE-blue)](https://tools.ietf.org/html/rfc7636)
+![GitHub stars](https://img.shields.io/github/stars/alishah730/auth-pkce?style=social)
+![GitHub forks](https://img.shields.io/github/forks/alishah730/auth-pkce?style=social)
+![GitHub issues](https://img.shields.io/github/issues/alishah730/auth-pkce)
+![GitHub pull requests](https://img.shields.io/github/issues-pr/alishah730/auth-pkce)

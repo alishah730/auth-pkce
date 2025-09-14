@@ -54,10 +54,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/auth-pkce.git"
+    "url": "https://github.com/alishah730/auth-pkce.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/auth-pkce/issues"
+    "url": "https://github.com/alishah730/auth-pkce/issues"
   },
-  "homepage": "https://github.com/yourusername/auth-pkce#readme"
+  "homepage": "https://github.com/alishah730/auth-pkce#readme",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/alishah730"
+  }
 }
