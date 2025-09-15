@@ -9,7 +9,8 @@ import {
   logoutCommand,
   whoamiCommand,
   refreshCommand,
-  statusCommand
+  statusCommand,
+  tokenCommand
 } from './commands';
 import logger from './utils/logger';
 
@@ -82,6 +83,14 @@ program
   .description('show current authentication status')
   .action(async () => {
     await statusCommand();
+  });
+
+// Token command
+program
+  .command('token')
+  .description('display access token and copy to clipboard')
+  .action(async () => {
+    await tokenCommand();
   });
 
 // Global error handling

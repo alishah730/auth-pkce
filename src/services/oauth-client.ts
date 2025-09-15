@@ -202,7 +202,8 @@ export class OAuthClient {
       scope: this.config.scope,
       state,
       code_challenge: pkceChallenge.codeChallenge,
-      code_challenge_method: pkceChallenge.codeChallengeMethod
+      code_challenge_method: pkceChallenge.codeChallengeMethod,
+      external: 'false'
     });
 
     return `${this.config.authorizationEndpoint}?${params.toString()}`;
@@ -313,7 +314,7 @@ export class OAuthClient {
         code,
         redirect_uri: redirectUri,
         client_id: this.config.clientId,
-        code_verifier: codeVerifier
+        code_verifier: codeVerifier,
       });
 
       const response = await axios.post<TokenResponse>(
