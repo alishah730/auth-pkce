@@ -3,8 +3,11 @@ import { ConfigManager } from '../config/manager';
 import { OAuthClient } from '../services/oauth-client';
 import { StoredTokens } from '../types';
 import logger from '../utils/logger';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const configManager = ConfigManager.getInstance();
+const execAsync = promisify(exec);
 
 /**
  * Configure command - Interactive setup of OAuth configuration
@@ -227,6 +230,74 @@ export async function statusCommand(): Promise<void> {
   } catch (error) {
     console.error(chalk.red('❌ Failed to get status:'), error instanceof Error ? error.message : error);
     logger.error('Status command failed', { error });
+    process.exit(1);
+  }
+}
+
+/**
+ * Token command - Display access token and copy to clipboard
+ */
+export async function tokenCommand(): Promise<void> {
+  try {
+    const config = await configManager.loadConfig();
+    const tokens = await configManager.loadTokens();
+    
+    if (!config || !tokens) {
+      console.error(chalk.red('❌ Not authenticated. Please run "auth-pkce login" first.'));
+      process.exit(1);
+    }
+    
+    // Check if token is expired
+    if (configManager.isTokenExpired(tokens)) {
+      console.error(chalk.red('❌ Access token expired. Please run "auth-pkce refresh" or "auth-pkce login".'));
+      process.exit(1);
+    }
+    
+    console.log(chalk.blue('🔑 Access Token:'));
+    console.log(chalk.white('─'.repeat(40)));
+    console.log(chalk.green(tokens.accessToken));
+    
+    const expiresIn = Math.floor((tokens.expiresAt - Date.now()) / 1000 / 60);
+    console.log(chalk.gray(`\nExpires in: ${expiresIn} minutes`));
+    
+    // Copy to clipboard
+    try {
+      // Detect platform and use appropriate clipboard command
+      const platform = process.platform;
+      let clipboardCmd: string;
+      
+      if (platform === 'darwin') {
+        clipboardCmd = 'pbcopy';
+      } else if (platform === 'win32') {
+        clipboardCmd = 'clip';
+      } else {
+        // Linux/Unix - try xclip first, then xsel
+        try {
+          await execAsync('which xclip');
+          clipboardCmd = 'xclip -selection clipboard';
+        } catch {
+          try {
+            await execAsync('which xsel');
+            clipboardCmd = 'xsel --clipboard --input';
+          } catch {
+            console.log(chalk.yellow('📋 Clipboard not available. Token displayed above.'));
+            return;
+          }
+        }
+      }
+      
+      // Copy token to clipboard
+      await execAsync(`echo "${tokens.accessToken}" | ${clipboardCmd}`);
+      console.log(chalk.green('📋 Access token copied to clipboard!'));
+      
+    } catch (error) {
+      console.log(chalk.yellow('📋 Could not copy to clipboard. Token displayed above.'));
+      logger.warn('Clipboard copy failed', { error });
+    }
+    
+  } catch (error) {
+    console.error(chalk.red('❌ Failed to get access token:'), error instanceof Error ? error.message : error);
+    logger.error('Token command failed', { error });
     process.exit(1);
   }
 }

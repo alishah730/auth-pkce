@@ -91,6 +91,9 @@ auth-pkce whoami
 
 # Show authentication status
 auth-pkce status
+
+# Display access token and copy to clipboard
+auth-pkce token
 ```
 
 ### Utility
