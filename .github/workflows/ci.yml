@@ -96,6 +96,9 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     needs: [test, security]
     if: github.event_name == 'release' && github.event.action == 'published'
     
@@ -122,7 +125,7 @@ jobs:
         ls -la dist/
         
     - name: Publish to npm
-      run: npm publish --access public
+      run: npm publish --provenance --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_NO_OTP }}
         
