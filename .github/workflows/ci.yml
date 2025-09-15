@@ -100,7 +100,7 @@ jobs:
       contents: read
       id-token: write
     needs: [test, security]
-    # if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'release' && github.event.action == 'published'
     
     steps:
     - name: Checkout code
@@ -115,6 +115,12 @@ jobs:
     - name: Install dependencies
       run: npm ci
       
+    - name: Update package version from tag
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        npm version $TAG_VERSION --no-git-tag-version
+        echo "Updated package.json to version $TAG_VERSION"
+        
     - name: Build package
       run: npm run build
       
@@ -122,8 +128,9 @@ jobs:
       run: |
         npm pack --dry-run
         ls -la dist/
+        cat package.json | grep version
         
     - name: Publish to npm
-      run: npm publish --provenance --access public --tag alpha
+      run: npm publish --provenance --access public
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
