@@ -98,7 +98,7 @@ export class ConfigManager {
         name: 'clientId',
         message: 'Enter your OAuth client ID:',
         default: this.config?.clientId,
-        validate: (input: string) => input.trim() !== '' || 'Client ID is required'
+        validate: (input: string): string | boolean => input.trim() !== '' || 'Client ID is required'
       },
       {
         type: 'input',
@@ -129,10 +129,14 @@ export class ConfigManager {
       }
     ];
 
-    const answers = await inquirer.prompt(questions);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const answers = await inquirer.prompt(questions as any);
     
     const config: CLIConfig = {
-      ...answers,
+      clientId: answers.clientId,
+      baseUrl: answers.baseUrl,
+      redirectUri: answers.redirectUri,
+      scope: answers.scope,
       configVersion: '1.0.0'
     };
 
