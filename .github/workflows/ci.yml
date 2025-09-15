@@ -161,6 +161,6 @@ jobs:
           registry-url: 'https://registry.npmjs.org/'
       - run: npm ci
       - run: npm run build
-      - run: npm publish --provenance --access public --tag v0.0.1-beta.1
+      - run: npm publish --provenance --access public --tag beta
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOEKEN_NO_OTP }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_NO_OTP }}
