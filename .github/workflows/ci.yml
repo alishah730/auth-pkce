@@ -100,14 +100,14 @@ jobs:
       contents: read
       id-token: write
     needs: [test, security]
-    # if: github.event_name == 'release' && github.event.action == 'published'
+   # if: github.event_name == 'release' && github.event.action == 'published'
     
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@v5
+    - uses: actions/setup-node@v5
       with:
         node-version: '24.x'
-        registry-url: 'https://registry.npmjs.org'
+        registry-url: 'https://registry.npmjs.org/'
         
     - run: npm ci
     
@@ -115,4 +115,4 @@ jobs:
 
     - run: npm publish --provenance --access public --tag beta
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN_NO_OTP }}
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
