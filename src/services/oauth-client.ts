@@ -292,7 +292,7 @@ export class OAuthClient {
 
       // Clear timeout on successful completion
       const originalResolve = resolve;
-      resolve = (value: string | PromiseLike<string>) => {
+      resolve = (value: string | PromiseLike<string>): void => {
         clearTimeout(timeoutId);
         originalResolve(value);
       };
