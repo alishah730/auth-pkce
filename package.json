@@ -1,6 +1,6 @@
 {
   "name": "auth-pkce",
-  "version": "1.0.0",
+  "version": "0.0.1-beta.1",
   "description": "A Node.js CLI tool for OAuth 2.0 PKCE authentication flow",
   "main": "dist/index.js",
   "bin": {
