@@ -131,6 +131,17 @@ jobs:
         cat package.json | grep version
         
     - name: Publish to npm
-      run: npm publish --provenance --access public
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        if [[ $TAG_VERSION =~ -[a-zA-Z] ]]; then
+          # Prerelease version - extract prerelease identifier
+          PRERELEASE_TAG=$(echo $TAG_VERSION | sed -n 's/.*-\([a-zA-Z][a-zA-Z0-9]*\).*/\1/p')
+          echo "Publishing prerelease version $TAG_VERSION with tag: $PRERELEASE_TAG"
+          npm publish --provenance --access public --tag $PRERELEASE_TAG
+        else
+          # Stable release
+          echo "Publishing stable version $TAG_VERSION"
+          npm publish --provenance --access public
+        fi
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
