@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import chalk from 'chalk';
 import { 
   configureCommand,
   loginCommand,
@@ -45,12 +44,12 @@ export class AuthPKCELibrary {
    */
   private setupSilentMode(): () => void {
     if (this.options.silent) {
-      console.log = () => {};
-      console.error = () => {};
+      console.log = (): void => {};
+      console.error = (): void => {};
     }
 
     // Return cleanup function
-    return () => {
+    return (): void => {
       console.log = this.originalLog;
       console.error = this.originalError;
     };
