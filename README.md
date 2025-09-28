@@ -14,16 +14,17 @@ A secure Node.js CLI tool for OAuth 2.0 PKCE (Proof Key for Code Exchange) authe
 - 🔄 **Token Refresh**: Automatic token refresh capabilities
 - 👤 **User Info**: Retrieve and display current user information
 - 🚪 **Secure Logout**: Token revocation and cleanup
+- 📦 **Library Support**: Easily integrate into your own Node.js CLIs
 
 ## Installation
 
-### Global Installation (Recommended)
+### As a CLI Tool (Global Installation)
 
 ```bash
 npm install -g auth-pkce
 ```
 
-### Local Installation
+### As a Library (Local Installation)
 
 ```bash
 npm install auth-pkce
@@ -95,6 +96,107 @@ auth-pkce status
 # Display access token and copy to clipboard
 auth-pkce token
 ```
+
+## Library Usage
+
+auth-pkce can be integrated as a library into your own Node.js CLI applications, allowing you to inherit all authentication functionality.
+
+### Quick Integration
+
+Add OAuth authentication to your existing CLI in one line:
+
+```typescript
+import { Command } from 'commander';
+import { addAuthToCLI } from 'auth-pkce';
+
+const program = new Command()
+  .name('my-cli')
+  .description('My awesome CLI')
+  .version('1.0.0');
+
+// Add all auth commands to your CLI
+addAuthToCLI(program, {
+  cliName: 'my-cli',
+  version: '1.0.0'
+});
+
+program.parse();
+```
+
+Your CLI now supports: `my-cli login`, `my-cli logout`, `my-cli auth configure`, etc.
+
+### Class-Based Integration
+
+For more control, use the `AuthPKCELibrary` class:
+
+```typescript
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const auth = new AuthPKCELibrary({
+  cliName: 'my-cli',
+  silent: false
+});
+
+// Add auth commands to existing program
+auth.addAuthCommands(program);
+
+// Or use individual auth functions
+await auth.login();
+await auth.whoami();
+await auth.status();
+```
+
+### Example: Protected Commands
+
+```typescript
+program
+  .command('deploy')
+  .description('Deploy app (requires authentication)')
+  .action(async () => {
+    try {
+      // Verify authentication before proceeding
+      await auth.status();
+      console.log('✅ Deploying application...');
+      // Your deployment logic here
+    } catch {
+      console.log('❌ Please authenticate: my-cli login');
+    }
+  });
+```
+
+### Library Options
+
+```typescript
+interface AuthPKCELibraryOptions {
+  cliName?: string;         // Custom CLI name for branding
+  version?: string;         // Custom version
+  suppressColors?: boolean; // Disable colored output  
+  silent?: boolean;         // Suppress console output
+}
+```
+
+### Example Project
+
+See the complete example in [`examples/ali-cli/`](examples/ali-cli/) which demonstrates:
+- Integrating auth commands into a custom CLI
+- Creating protected commands that require authentication
+- Custom branding and command structure
+
+```bash
+# Try the example
+cd examples/ali-cli
+npm install && npm run build
+node dist/cli.js --help
+```
+
+### Available Integration Methods
+
+1. **`addAuthToCLI(program, options)`** - Quick one-liner integration
+2. **`new AuthPKCELibrary(options)`** - Full control with class instance
+3. **`createAuthPKCE(options)`** - Factory function for quick setup
+4. **Individual command imports** - Import specific commands only
+
+For detailed integration examples, see [`examples/integration-examples.md`](examples/integration-examples.md).
 
 ### Utility
 

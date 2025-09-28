@@ -113,10 +113,12 @@ program.configureHelp({
 });
 
 // Override help to show logo
-const originalHelp = program.help;
-program.help = function(options?: any) {
+const originalHelp = program.help.bind(program);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+program.help = function(...args: any[]): never {
   console.log(chalk.cyan(ASCII_LOGO));
-  return originalHelp.call(this, options);
+   
+  return originalHelp(...args);
 };
 
 // Parse command line arguments

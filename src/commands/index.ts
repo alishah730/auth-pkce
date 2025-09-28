@@ -22,7 +22,7 @@ export async function configureCommand(options: { baseUrl?: string }): Promise<v
     console.log(chalk.gray(`Config saved to: ${require('os').homedir()}/.auth-pkce/config.json`));
   } catch (error) {
     console.error(chalk.red('❌ Configuration failed:'), error instanceof Error ? error.message : error);
-    logger.error('Configuration command failed', { error });
+    logger.error('Configuration command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -62,7 +62,7 @@ export async function loginCommand(): Promise<void> {
     process.exit(0);
   } catch (error) {
     console.error(chalk.red('❌ Authentication failed:'), error instanceof Error ? error.message : error);
-    logger.error('Login command failed', { error });
+    logger.error('Login command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -94,7 +94,7 @@ export async function logoutCommand(): Promise<void> {
     console.log(chalk.green('✅ Logged out successfully!'));
   } catch (error) {
     console.error(chalk.red('❌ Logout failed:'), error instanceof Error ? error.message : error);
-    logger.error('Logout command failed', { error });
+    logger.error('Logout command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -136,7 +136,7 @@ export async function whoamiCommand(): Promise<void> {
     }
   } catch (error) {
     console.error(chalk.red('❌ Failed to get user info:'), error instanceof Error ? error.message : error);
-    logger.error('Whoami command failed', { error });
+    logger.error('Whoami command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -181,7 +181,7 @@ export async function refreshCommand(): Promise<void> {
   } catch (error) {
     console.error(chalk.red('❌ Token refresh failed:'), error instanceof Error ? error.message : error);
     console.log(chalk.yellow('💡 Try running "auth-pkce login" to authenticate again.'));
-    logger.error('Refresh command failed', { error });
+    logger.error('Refresh command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -229,7 +229,7 @@ export async function statusCommand(): Promise<void> {
     console.log(chalk.cyan('Has refresh token:'), tokens.refreshToken ? chalk.green('✅ Yes') : chalk.red('❌ No'));
   } catch (error) {
     console.error(chalk.red('❌ Failed to get status:'), error instanceof Error ? error.message : error);
-    logger.error('Status command failed', { error });
+    logger.error('Status command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
@@ -297,7 +297,7 @@ export async function tokenCommand(): Promise<void> {
     
   } catch (error) {
     console.error(chalk.red('❌ Failed to get access token:'), error instanceof Error ? error.message : error);
-    logger.error('Token command failed', { error });
+    logger.error('Token command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
     process.exit(1);
   }
 }
