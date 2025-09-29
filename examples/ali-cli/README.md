@@ -17,6 +17,7 @@ Plus custom commands:
 - `ali hello` - Say hello (public command)
 - `ali profile` - Show user profile (requires authentication)
 - `ali protected` - Example protected command
+- `ali publish <type> <path>` - Publish content using authenticated API calls
 
 ## Installation
 
@@ -54,6 +55,13 @@ ali hello --name "Developer"
 # Protected commands (require authentication)
 ali profile
 ali protected
+
+# Publish content with API calls using bearer token
+ali publish image ./my-image.jpg
+ali publish document ./report.pdf --api-url https://api.myservice.com/v1/upload
+
+# Test API calls without actually publishing
+ali publish image ./test.jpg --dry-run
 
 # Check authentication status
 ali auth status
@@ -99,6 +107,10 @@ const authLib = new AuthPKCELibrary();
 await authLib.login();
 await authLib.whoami();
 await authLib.status();
+
+// Get bearer token for API calls
+const bearerToken = await authLib.getBearerToken();
+// Use bearerToken in your API calls
 ```
 
 ### Method 3: Creating a New CLI

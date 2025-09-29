@@ -317,4 +317,206 @@ try {
 }
 ```
 
-This makes it easy for any Node.js CLI to inherit robust OAuth 2.0 PKCE authentication!
+## Bearer Token Usage for API Calls
+
+The library provides methods to extract bearer tokens for making authenticated API calls:
+
+### 7. Using Bearer Tokens in Commands
+
+```typescript
+#!/usr/bin/env node
+import { Command } from 'commander';
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const program = new Command();
+const auth = new AuthPKCELibrary({ cliName: 'my-api-cli' });
+
+auth.addAuthCommands(program);
+
+// Command that uses bearer token for API calls
+program
+  .command('upload')
+  .argument('<file>', 'File to upload')
+  .option('--api-url <url>', 'API endpoint', 'https://api.example.com/upload')
+  .action(async (file, options) => {
+    try {
+      // Get bearer token (formatted for Authorization header)
+      const bearerToken = await auth.getBearerToken();
+      
+      console.log('📤 Uploading file with authentication...');
+      
+      // Example with fetch API
+      const response = await fetch(options.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': bearerToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filename: file,
+          timestamp: new Date().toISOString()
+        })
+      });
+      
+      if (response.ok) {
+        console.log('✅ Upload successful!');
+      } else {
+        console.log(`❌ Upload failed: ${response.status}`);
+      }
+      
+    } catch (error) {
+      if (error.message?.includes('not authenticated')) {
+        console.log('❌ Please login first: my-api-cli login');
+      } else if (error.message?.includes('expired')) {
+        console.log('❌ Token expired: my-api-cli auth refresh');
+      } else {
+        console.log('❌ Upload failed:', error.message);
+      }
+    }
+  });
+
+program.parse();
+```
+
+### 8. Advanced API Integration with Axios
+
+```typescript
+import axios from 'axios';
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const auth = new AuthPKCELibrary({ cliName: 'data-cli' });
+
+// Create axios instance with interceptor for automatic token injection
+async function createAuthenticatedAxios() {
+  const bearerToken = await auth.getBearerToken();
+  
+  const axiosInstance = axios.create({
+    baseURL: 'https://api.example.com/v1',
+    headers: {
+      'Authorization': bearerToken,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  // Add response interceptor to handle token expiration
+  axiosInstance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      if (error.response?.status === 401) {
+        console.log('Token expired, attempting refresh...');
+        try {
+          await auth.refresh();
+          // Retry the original request with new token
+          const newBearerToken = await auth.getBearerToken();
+          error.config.headers['Authorization'] = newBearerToken;
+          return axiosInstance.request(error.config);
+        } catch (refreshError) {
+          console.log('Refresh failed. Please login again: data-cli login');
+          process.exit(1);
+        }
+      }
+      return Promise.reject(error);
+    }
+  );
+  
+  return axiosInstance;
+}
+
+// Usage in commands
+program
+  .command('fetch-data')
+  .option('--endpoint <path>', 'API endpoint path', '/data')
+  .action(async (options) => {
+    try {
+      const api = await createAuthenticatedAxios();
+      const response = await api.get(options.endpoint);
+      
+      console.log('✅ Data fetched successfully!');
+      console.log(JSON.stringify(response.data, null, 2));
+      
+    } catch (error) {
+      console.log('❌ Failed to fetch data:', error.message);
+    }
+  });
+```
+
+### 9. Token Validation Helper
+
+```typescript
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const auth = new AuthPKCELibrary();
+
+// Helper function to ensure valid token
+async function withValidToken<T>(operation: (token: string) => Promise<T>): Promise<T> {
+  try {
+    const bearerToken = await auth.getBearerToken();
+    return await operation(bearerToken);
+  } catch (error) {
+    if (error.message?.includes('expired')) {
+      console.log('🔄 Token expired, refreshing...');
+      await auth.refresh();
+      const newToken = await auth.getBearerToken();
+      return await operation(newToken);
+    }
+    throw error;
+  }
+}
+
+// Usage
+program
+  .command('api-action')
+  .action(async () => {
+    try {
+      const result = await withValidToken(async (bearerToken) => {
+        const response = await fetch('https://api.example.com/action', {
+          method: 'POST',
+          headers: { 'Authorization': bearerToken }
+        });
+        return response.json();
+      });
+      
+      console.log('✅ Action completed:', result);
+    } catch (error) {
+      console.log('❌ Action failed:', error.message);
+    }
+  });
+```
+
+### Available Token Methods
+
+```typescript
+// Get raw access token
+const accessToken = await auth.getAccessToken();
+// Returns: "eyJhbGciOiJSUzI1NiIs..."
+
+// Get formatted bearer token (recommended)
+const bearerToken = await auth.getBearerToken();
+// Returns: "Bearer eyJhbGciOiJSUzI1NiIs..."
+
+// Use bearer token in API calls
+const response = await fetch('https://api.example.com/data', {
+  headers: {
+    'Authorization': bearerToken  // Ready to use
+  }
+});
+```
+
+### Error Handling for Token Operations
+
+```typescript
+try {
+  const bearerToken = await auth.getBearerToken();
+  // Use token for API calls
+} catch (error) {
+  if (error.message.includes('Not authenticated')) {
+    console.log('Please run: my-cli login');
+  } else if (error.message.includes('expired')) {
+    console.log('Please run: my-cli auth refresh');
+  } else {
+    console.log('Authentication error:', error.message);
+  }
+}
+```
+
+This makes it easy for any Node.js CLI to inherit robust OAuth 2.0 PKCE authentication and use the tokens for secure API interactions!

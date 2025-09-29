@@ -175,6 +175,70 @@ interface AuthPKCELibraryOptions {
 }
 ```
 
+### Using Bearer Tokens for API Calls
+
+The library provides methods to extract bearer tokens for making authenticated API calls:
+
+```typescript
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const auth = new AuthPKCELibrary();
+
+// Get access token as string
+const accessToken = await auth.getAccessToken();
+
+// Get formatted bearer token for Authorization header
+const bearerToken = await auth.getBearerToken(); // Returns "Bearer <token>"
+
+// Use in API calls
+const response = await fetch('https://api.example.com/data', {
+  headers: {
+    'Authorization': bearerToken,
+    'Content-Type': 'application/json'
+  }
+});
+```
+
+### Real-World API Integration Example
+
+```typescript
+program
+  .command('publish')
+  .argument('<file>', 'File to publish')
+  .option('--api-url <url>', 'API endpoint')
+  .action(async (file, options) => {
+    try {
+      // Get bearer token
+      const bearerToken = await auth.getBearerToken();
+      
+      // Make authenticated API call
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(file));
+      
+      const response = await fetch(options.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': bearerToken
+        },
+        body: formData
+      });
+      
+      if (response.ok) {
+        console.log('✅ File published successfully!');
+      } else {
+        console.log(`❌ Upload failed: ${response.status}`);
+      }
+      
+    } catch (error) {
+      if (error.message?.includes('expired')) {
+        console.log('Token expired. Run: my-cli auth refresh');
+      } else {
+        console.log('Authentication required. Run: my-cli login');
+      }
+    }
+  });
+```
+
 ### Example Project
 
 See the complete example in [`examples/ali-cli/`](examples/ali-cli/) which demonstrates:
@@ -197,6 +261,200 @@ node dist/cli.js --help
 4. **Individual command imports** - Import specific commands only
 
 For detailed integration examples, see [`examples/integration-examples.md`](examples/integration-examples.md).
+
+### Detailed Usage Example
+
+Here's a complete example showing how to build a CLI with authentication:
+
+```typescript
+#!/usr/bin/env node
+import { Command } from 'commander';
+import chalk from 'chalk';
+import { AuthPKCELibrary } from 'auth-pkce';
+
+// Create the main CLI program
+const program = new Command();
+const packageJson = require('../package.json');
+
+// Initialize auth-pkce library with custom branding
+const authLib = new AuthPKCELibrary({
+  cliName: 'my-app',
+  version: packageJson.version
+});
+
+// Set up main program
+program
+  .name('my-app')
+  .description('My CLI with OAuth 2.0 authentication')
+  .version(packageJson.version);
+
+// Add authentication commands
+authLib.addAuthCommands(program);
+
+// Public command (no auth required)
+program
+  .command('hello')
+  .description('Say hello!')
+  .option('-n, --name <name>', 'Name to greet', 'World')
+  .action((options) => {
+    console.log(chalk.blue(`👋 Hello, ${options.name}!`));
+    console.log(chalk.yellow('💡 Use "my-app login" to access protected features.'));
+  });
+
+// Protected command with authentication check
+program
+  .command('deploy')
+  .description('Deploy application (requires authentication)')
+  .option('--env <environment>', 'Target environment', 'production')
+  .action(async (options) => {
+    console.log(chalk.blue('🚀 Deploy Command'));
+    console.log(chalk.gray('Verifying authentication...'));
+    
+    try {
+      // Check authentication status first
+      await authLib.status();
+      
+      console.log(chalk.green('✅ Authentication verified!'));
+      console.log(chalk.cyan(`🎯 Deploying to ${options.env}...`));
+      
+      // Your deployment logic here
+      console.log(chalk.green('✅ Deployment completed successfully!'));
+      
+    } catch (error) {
+      console.log(chalk.red('\n❌ Authentication required!'));
+      console.log(chalk.yellow('Please run: my-app login'));
+      process.exit(1);
+    }
+  });
+
+// Protected command with user info
+program
+  .command('profile')
+  .description('Show user profile (requires authentication)')
+  .action(async () => {
+    console.log(chalk.blue('👤 User Profile'));
+    console.log(chalk.gray('Fetching user information...'));
+    
+    try {
+      // Use the library's whoami function
+      await authLib.whoami();
+    } catch (error) {
+      console.log(chalk.red('❌ Please authenticate first: my-app login'));
+      process.exit(1);
+    }
+  });
+
+// Advanced: Protected command with bearer token for API calls
+program
+  .command('api-call')
+  .description('Make authenticated API call')
+  .option('--endpoint <url>', 'API endpoint to call', 'https://api.example.com/data')
+  .action(async (options) => {
+    try {
+      // Get the bearer token for API authentication
+      const bearerToken = await authLib.getBearerToken();
+      
+      console.log(chalk.blue('🌐 Making authenticated API call...'));
+      console.log(chalk.gray(`Endpoint: ${options.endpoint}`));
+      
+      // Example API call with bearer token
+      const response = await fetch(options.endpoint, {
+        method: 'GET',
+        headers: {
+          'Authorization': bearerToken,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        console.log(chalk.green('✅ API call successful!'));
+        const data = await response.json();
+        console.log(chalk.gray('Response:', JSON.stringify(data, null, 2)));
+      } else {
+        console.log(chalk.red(`❌ API call failed: ${response.status}`));
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('not authenticated')) {
+        console.log(chalk.red('❌ Authentication required. Run: my-app login'));
+      } else if (errorMessage.includes('expired')) {
+        console.log(chalk.red('❌ Token expired. Run: my-app auth refresh'));
+      } else {
+        console.log(chalk.red('❌ API call failed:'), errorMessage);
+      }
+      process.exit(1);
+    }
+  });
+
+program.parse();
+
+// Show help if no command provided
+if (!process.argv.slice(2).length) {
+  program.outputHelp();
+}
+```
+
+### Authentication Flow Example
+
+Once integrated, your users will have this authentication flow:
+
+```bash
+# 1. Initial setup (one-time)
+my-app auth configure
+# Prompts for OAuth provider URL, Client ID, etc.
+
+# 2. Authenticate
+my-app login
+# Opens browser, completes OAuth flow, stores tokens securely
+
+# 3. Use protected commands
+my-app deploy --env staging
+# ✅ Authentication verified!
+# 🎯 Deploying to staging...
+
+# 4. Check authentication anytime
+my-app auth status
+# 📊 Authentication Status:
+# Configuration: ✅ Found
+# Authentication: ✅ Active
+# Expires in: 45 minutes
+
+# 5. When tokens expire
+my-app auth refresh
+# ✅ Access token refreshed successfully!
+```
+
+### Error Handling Pattern
+
+```typescript
+async function requireAuth(): Promise<void> {
+  try {
+    await authLib.status();
+  } catch (error) {
+    console.log(chalk.red('❌ Authentication required'));
+    
+    // Check what kind of error
+    if (error.message?.includes('configuration')) {
+      console.log(chalk.yellow('Run: my-app auth configure'));
+    } else if (error.message?.includes('expired')) {
+      console.log(chalk.yellow('Run: my-app auth refresh'));
+    } else {
+      console.log(chalk.yellow('Run: my-app login'));
+    }
+    
+    process.exit(1);
+  }
+}
+
+// Use in your commands
+program
+  .command('secure-action')
+  .action(async () => {
+    await requireAuth();
+    // Your secure functionality here
+  });
+```
 
 ### Utility
 

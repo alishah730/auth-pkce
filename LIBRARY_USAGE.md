@@ -89,6 +89,10 @@ class AuthPKCELibrary {
   async refresh(): Promise<void>
   async status(): Promise<void>
   async token(): Promise<void>
+  
+  // Token extraction methods for API calls
+  async getAccessToken(): Promise<string>
+  async getBearerToken(): Promise<string>
 }
 ```
 

@@ -239,6 +239,36 @@ export class AuthPKCELibrary {
       cleanup();
     }
   }
+
+  /**
+   * Get the access token as a string (for programmatic use)
+   */
+  public async getAccessToken(): Promise<string> {
+    const { ConfigManager } = await import('../config/manager');
+    const configManager = ConfigManager.getInstance();
+    
+    const config = await configManager.loadConfig();
+    const tokens = await configManager.loadTokens();
+    
+    if (!config || !tokens) {
+      throw new Error('Not authenticated. Please run login first.');
+    }
+    
+    // Check if token is expired
+    if (configManager.isTokenExpired(tokens)) {
+      throw new Error('Access token expired. Please run refresh or login.');
+    }
+    
+    return tokens.accessToken;
+  }
+
+  /**
+   * Get the bearer token formatted for Authorization header
+   */
+  public async getBearerToken(): Promise<string> {
+    const accessToken = await this.getAccessToken();
+    return `Bearer ${accessToken}`;
+  }
 }
 
 /**
