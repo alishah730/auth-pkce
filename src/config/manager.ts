@@ -121,6 +121,17 @@ export class ConfigManager {
         default: this.config?.scope || 'openid profile email'
       },
       {
+        type: 'input',
+        name: 'audience',
+        message: 'Enter the token exchange audience (optional, leave empty if not needed):',
+        default: this.config?.audience || '',
+        validate: (input: string): string | boolean => {
+          if (input.trim() === '') return true; // Allow empty
+          if (input.trim().length > 0) return true; // Allow any non-empty string
+          return 'Please enter a valid audience string or leave empty';
+        }
+      },
+      {
         type: 'list',
         name: 'logLevel',
         message: 'Select log level:',
@@ -137,6 +148,8 @@ export class ConfigManager {
       baseUrl: answers.baseUrl,
       redirectUri: answers.redirectUri,
       scope: answers.scope,
+      audience: answers.audience.trim() || undefined,
+      logLevel: answers.logLevel,
       configVersion: '1.0.0'
     };
 

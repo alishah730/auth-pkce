@@ -317,6 +317,11 @@ export class OAuthClient {
         code_verifier: codeVerifier,
       });
 
+      // Add audience parameter if configured for WSO2 token exchange
+      if (this.config.audience) {
+        params.append('audience', this.config.audience);
+      }
+
       const response = await axios.post<TokenResponse>(
         this.config.tokenEndpoint!,
         params.toString(),
