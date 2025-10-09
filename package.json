@@ -33,7 +33,7 @@
   "author": "Ali Shah <alishah730@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@eslint/js": "^9.35.0",
+    "@eslint/js": "^9.37.0",
     "axios": "^1.12.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.1",
@@ -41,21 +41,21 @@
     "fs-extra": "^11.3.2",
     "inquirer": "^12.9.6",
     "open": "^10.2.0",
-    "winston": "^3.17.0"
+    "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/fs-extra": "^11.0.4",
-    "@types/inquirer": "^9.0.7",
+    "@types/inquirer": "^9.0.9",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.5.2",
-    "@typescript-eslint/eslint-plugin": "^8.44.0",
-    "@typescript-eslint/parser": "^8.44.0",
-    "eslint": "^9.36.0",
+    "@types/node": "^24.7.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.0",
+    "@typescript-eslint/parser": "^8.46.0",
+    "eslint": "^9.37.0",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.9.3"
   },
   "engines": {
     "node": ">=22.0.0"
