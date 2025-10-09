@@ -5,3 +5,4 @@ export * from './services/oidc-discovery';
 export * from './utils/crypto';
 export * from './utils/logger';
 export * from './commands';
+export * from './api';

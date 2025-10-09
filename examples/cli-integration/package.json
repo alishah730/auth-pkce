@@ -1,0 +1,37 @@
+{
+  "name": "example-api-cli",
+  "version": "1.0.0",
+  "description": "Example CLI that integrates with auth-pkce for authentication",
+  "main": "dist/index.js",
+  "bin": {
+    "my-api-cli": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "auth-pkce": "^0.0.3",
+    "axios": "^1.12.2",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "cli",
+    "api",
+    "oauth",
+    "auth-pkce",
+    "example"
+  ],
+  "author": "Example Developer",
+  "license": "MIT"
+}

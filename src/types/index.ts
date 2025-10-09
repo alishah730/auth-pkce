@@ -3,6 +3,7 @@ export interface OAuthConfig {
   baseUrl: string;
   redirectUri: string;
   scope: string;
+  audience?: string;
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   userinfoEndpoint?: string;

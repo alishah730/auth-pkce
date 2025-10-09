@@ -42,6 +42,7 @@ This will prompt you for:
 - Client ID
 - Redirect URI (default: `http://localhost:8080/callback`)
 - OAuth scopes (default: `openid profile email`)
+- Token exchange audience (optional, for WSO2 and similar providers)
 - Log level
 
 ### 2. Authenticate
@@ -116,6 +117,7 @@ Configuration is stored in `~/.auth-pkce/config.json` with the following structu
   "clientId": "your-client-id",
   "redirectUri": "http://localhost:8080/callback",
   "scope": "openid profile email",
+  "audience": "https://your-api-audience.com",
   "logLevel": "info",
   "configVersion": "1.0.0"
 }
