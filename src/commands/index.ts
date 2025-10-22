@@ -264,21 +264,36 @@ export async function tokenCommand(): Promise<void> {
     try {
       // Detect platform and use appropriate clipboard command
       const platform = process.platform;
-      let clipboardCmd: string;
       
       if (platform === 'darwin') {
-        clipboardCmd = 'pbcopy';
+        // macOS - use printf to avoid newline and quotes
+        await execAsync(`printf '%s' "${tokens.accessToken}" | pbcopy`);
       } else if (platform === 'win32') {
-        clipboardCmd = 'clip';
+        // Windows - write to file then use clip to avoid quote issues
+        const { writeFile, unlink } = await import('fs/promises');
+        const tmpFile = `${process.env.TEMP || process.env.TMP || '.'}/.auth-pkce-token-tmp`;
+        try {
+          await writeFile(tmpFile, tokens.accessToken, 'utf8');
+          await execAsync(`type "${tmpFile}" | clip`);
+          await unlink(tmpFile);
+        } catch (err) {
+          // Try to clean up temp file even if clip fails
+          try { 
+            await unlink(tmpFile); 
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw err;
+        }
       } else {
         // Linux/Unix - try xclip first, then xsel
         try {
           await execAsync('which xclip');
-          clipboardCmd = 'xclip -selection clipboard';
+          await execAsync(`printf '%s' "${tokens.accessToken}" | xclip -selection clipboard`);
         } catch {
           try {
             await execAsync('which xsel');
-            clipboardCmd = 'xsel --clipboard --input';
+            await execAsync(`printf '%s' "${tokens.accessToken}" | xsel --clipboard --input`);
           } catch {
             console.log(chalk.yellow('📋 Clipboard not available. Token displayed above.'));
             return;
@@ -286,8 +301,6 @@ export async function tokenCommand(): Promise<void> {
         }
       }
       
-      // Copy token to clipboard
-      await execAsync(`echo "${tokens.accessToken}" | ${clipboardCmd}`);
       console.log(chalk.green('📋 Access token copied to clipboard!'));
       
     } catch (error) {
