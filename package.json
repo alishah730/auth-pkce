@@ -39,7 +39,7 @@
     "commander": "^14.0.2",
     "express": "^5.1.0",
     "fs-extra": "^11.3.2",
-    "inquirer": "^12.10.0",
+    "inquirer": "^14.0.2",
     "open": "^11.0.0",
     "winston": "^3.18.3"
   },
