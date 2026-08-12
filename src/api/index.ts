@@ -1,101 +1,84 @@
 import { ConfigManager } from '../config/manager';
-import { StoredTokens, CLIConfig } from '../types';
+import { OAuthClient } from '../services/oauth-client';
+import { AuthStatus, CLIConfig, StoredTokens, UserInfo } from '../types';
 import logger from '../utils/logger';
 
 export interface AuthPkceApiOptions {
   autoRefresh?: boolean;
+  clockSkewSeconds?: number;
+  configDir?: string;
 }
 
 export class AuthPkceApi {
-  private configManager: ConfigManager;
-  private options: AuthPkceApiOptions;
+  private readonly configManager: ConfigManager;
+  private readonly autoRefresh: boolean;
+  private readonly clockSkewSeconds: number;
+  private refreshInFlight: Promise<boolean> | null = null;
 
-  constructor(options: AuthPkceApiOptions = {}) {
-    this.configManager = ConfigManager.getInstance();
-    this.options = {
-      autoRefresh: true,
-      ...options
-    };
+  public constructor(options: AuthPkceApiOptions = {}) {
+    this.configManager = options.configDir
+      ? new ConfigManager({ configDir: options.configDir })
+      : ConfigManager.getInstance();
+    this.autoRefresh = options.autoRefresh ?? true;
+    this.clockSkewSeconds = options.clockSkewSeconds ?? 30;
   }
 
-  /**
-   * Check if user is authenticated
-   */
-  async isAuthenticated(): Promise<boolean> {
+  public async isAuthenticated(): Promise<boolean> {
     try {
-      const config = await this.configManager.loadConfig();
-      const tokens = await this.configManager.loadTokens();
-      
+      const [config, tokens] = await Promise.all([
+        this.configManager.loadConfig(),
+        this.configManager.loadTokens(),
+      ]);
       if (!config || !tokens) {
         return false;
       }
 
-      // Check if token is expired
-      if (this.configManager.isTokenExpired(tokens)) {
-        if (this.options.autoRefresh && tokens.refreshToken) {
-          return await this.refreshToken();
-        }
-        return false;
+      if (!this.configManager.isTokenExpired(tokens, this.clockSkewSeconds)) {
+        return true;
       }
-
-      return true;
+      return Boolean(this.autoRefresh && tokens.refreshToken && await this.refreshToken());
     } catch (error) {
       logger.error('Failed to check authentication status', { error });
       return false;
     }
   }
 
-  /**
-   * Get current access token
-   */
-  async getAccessToken(): Promise<string | null> {
+  public async getAccessToken(): Promise<string | null> {
     try {
       const tokens = await this.configManager.loadTokens();
-      
       if (!tokens) {
         return null;
       }
 
-      // Check if token is expired
-      if (this.configManager.isTokenExpired(tokens)) {
-        if (this.options.autoRefresh && tokens.refreshToken) {
-          const refreshed = await this.refreshToken();
-          if (refreshed) {
-            const newTokens = await this.configManager.loadTokens();
-            return newTokens?.accessToken || null;
-          }
-        }
-        return null;
+      if (!this.configManager.isTokenExpired(tokens, this.clockSkewSeconds)) {
+        return tokens.accessToken;
       }
 
-      return tokens.accessToken;
+      if (!this.autoRefresh || !tokens.refreshToken || !await this.refreshToken()) {
+        return null;
+      }
+      return (await this.configManager.loadTokens())?.accessToken ?? null;
     } catch (error) {
       logger.error('Failed to get access token', { error });
       return null;
     }
   }
 
-  /**
-   * Get token information including expiration
-   */
-  async getTokenInfo(): Promise<StoredTokens | null> {
+  public async getTokenInfo(): Promise<StoredTokens | null> {
     try {
       const tokens = await this.configManager.loadTokens();
-      
       if (!tokens) {
         return null;
       }
 
-      // Auto-refresh if expired and enabled
-      if (this.configManager.isTokenExpired(tokens)) {
-        if (this.options.autoRefresh && tokens.refreshToken) {
-          const refreshed = await this.refreshToken();
-          if (refreshed) {
-            return await this.configManager.loadTokens();
-          }
-        }
+      if (
+        this.configManager.isTokenExpired(tokens, this.clockSkewSeconds) &&
+        this.autoRefresh &&
+        tokens.refreshToken &&
+        await this.refreshToken()
+      ) {
+        return this.configManager.loadTokens();
       }
-
       return tokens;
     } catch (error) {
       logger.error('Failed to get token info', { error });
@@ -103,10 +86,7 @@ export class AuthPkceApi {
     }
   }
 
-  /**
-   * Get current configuration
-   */
-  async getConfig(): Promise<CLIConfig | null> {
+  public async getConfig(): Promise<CLIConfig | null> {
     try {
       return await this.configManager.loadConfig();
     } catch (error) {
@@ -115,35 +95,35 @@ export class AuthPkceApi {
     }
   }
 
-  /**
-   * Refresh access token
-   */
-  async refreshToken(): Promise<boolean> {
+  public async refreshToken(): Promise<boolean> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.performRefresh().finally(() => {
+        this.refreshInFlight = null;
+      });
+    }
+    return this.refreshInFlight;
+  }
+
+  private async performRefresh(): Promise<boolean> {
     try {
-      const config = await this.configManager.loadConfig();
-      const tokens = await this.configManager.loadTokens();
-      
-      if (!config || !tokens || !tokens.refreshToken) {
+      const [config, tokens] = await Promise.all([
+        this.configManager.loadConfig(),
+        this.configManager.loadTokens(),
+      ]);
+      if (!config || !tokens?.refreshToken) {
         return false;
       }
 
-      const { OAuthClient } = await import('../services/oauth-client');
-      const oauthClient = new OAuthClient(config);
-      
-      const newTokens = await oauthClient.refreshToken(tokens.refreshToken);
-      
-      // Update stored tokens
+      const response = await new OAuthClient(config).refreshToken(tokens.refreshToken);
       const updatedTokens: StoredTokens = {
-        accessToken: newTokens.access_token,
-        refreshToken: newTokens.refresh_token || tokens.refreshToken,
-        idToken: newTokens.id_token,
-        expiresAt: Date.now() + (newTokens.expires_in * 1000),
-        tokenType: newTokens.token_type,
-        scope: newTokens.scope || tokens.scope
+        accessToken: response.access_token,
+        refreshToken: response.refresh_token || tokens.refreshToken,
+        idToken: response.id_token || tokens.idToken,
+        expiresAt: Date.now() + response.expires_in * 1000,
+        tokenType: response.token_type,
+        scope: response.scope || tokens.scope,
       };
-      
       await this.configManager.saveTokens(updatedTokens);
-      logger.info('Token refreshed successfully');
       return true;
     } catch (error) {
       logger.error('Failed to refresh token', { error });
@@ -151,93 +131,55 @@ export class AuthPkceApi {
     }
   }
 
-  /**
-   * Check if configuration exists
-   */
-  async hasConfiguration(): Promise<boolean> {
-    try {
-      const config = await this.configManager.loadConfig();
-      return config !== null;
-    } catch (error) {
-      logger.error('Failed to check configuration', { error });
-      return false;
-    }
+  public async hasConfiguration(): Promise<boolean> {
+    return (await this.getConfig()) !== null;
   }
 
-  /**
-   * Get user information from stored ID token
-   */
-  async getUserInfo(): Promise<any | null> {
+  public async getUserInfo(): Promise<UserInfo | null> {
     try {
-      const tokens = await this.getTokenInfo();
-      
-      if (!tokens?.idToken) {
+      const [config, accessToken] = await Promise.all([
+        this.configManager.loadConfig(),
+        this.getAccessToken(),
+      ]);
+      if (!config || !accessToken) {
         return null;
       }
-
-      // Decode JWT payload (simple base64 decode, no verification)
-      const payload = tokens.idToken.split('.')[1];
-      const decoded = Buffer.from(payload, 'base64').toString('utf-8');
-      return JSON.parse(decoded);
+      return await new OAuthClient(config).getUserInfo(accessToken);
     } catch (error) {
-      logger.error('Failed to get user info from token', { error });
+      logger.error('Failed to get user info', { error });
       return null;
     }
   }
 
-  /**
-   * Get authentication status summary
-   */
-  async getAuthStatus(): Promise<{
-    isAuthenticated: boolean;
-    hasConfig: boolean;
-    tokenExpiresIn?: number;
-    userInfo?: any;
-  }> {
-    try {
-      const hasConfig = await this.hasConfiguration();
-      const isAuth = await this.isAuthenticated();
-      const tokenInfo = await this.getTokenInfo();
-      const userInfo = await this.getUserInfo();
+  public async getAuthStatus(): Promise<AuthStatus> {
+    const hasConfig = await this.hasConfiguration();
+    const isAuthenticated = hasConfig && await this.isAuthenticated();
+    const tokenInfo = await this.configManager.loadTokens().catch(() => null);
+    const userInfo = isAuthenticated ? await this.getUserInfo() : null;
 
-      let tokenExpiresIn: number | undefined;
-      if (tokenInfo) {
-        tokenExpiresIn = Math.floor((tokenInfo.expiresAt - Date.now()) / 1000 / 60);
-      }
-
-      return {
-        isAuthenticated: isAuth,
-        hasConfig,
-        tokenExpiresIn,
-        userInfo
-      };
-    } catch (error) {
-      logger.error('Failed to get auth status', { error });
-      return {
-        isAuthenticated: false,
-        hasConfig: false
-      };
-    }
+    return {
+      isAuthenticated,
+      hasConfig,
+      tokenExpiresIn: tokenInfo
+        ? Math.max(0, Math.floor((tokenInfo.expiresAt - Date.now()) / 60_000))
+        : undefined,
+      userInfo: userInfo ?? undefined,
+    };
   }
 }
 
-// Export convenience functions
 export async function getAccessToken(options?: AuthPkceApiOptions): Promise<string | null> {
-  const api = new AuthPkceApi(options);
-  return api.getAccessToken();
+  return new AuthPkceApi(options).getAccessToken();
 }
 
 export async function isAuthenticated(options?: AuthPkceApiOptions): Promise<boolean> {
-  const api = new AuthPkceApi(options);
-  return api.isAuthenticated();
+  return new AuthPkceApi(options).isAuthenticated();
 }
 
 export async function getTokenInfo(options?: AuthPkceApiOptions): Promise<StoredTokens | null> {
-  const api = new AuthPkceApi(options);
-  return api.getTokenInfo();
+  return new AuthPkceApi(options).getTokenInfo();
 }
 
-export async function getAuthStatus(options?: AuthPkceApiOptions) {
-  const api = new AuthPkceApi(options);
-  return api.getAuthStatus();
+export async function getAuthStatus(options?: AuthPkceApiOptions): Promise<AuthStatus> {
+  return new AuthPkceApi(options).getAuthStatus();
 }

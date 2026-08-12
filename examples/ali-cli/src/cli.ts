@@ -1,174 +1,117 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
 import chalk from 'chalk';
+import { Command } from 'commander';
+import packageJson from '../package.json';
 import { AuthPKCELibrary } from 'auth-pkce';
 
-// Create the main CLI program
 const program = new Command();
-
-// Package info
-const packageJson = require('../package.json');
-
-// Initialize auth-pkce library with custom branding
-const authLib = new AuthPKCELibrary({
+const auth = new AuthPKCELibrary({
   cliName: 'ali',
-  version: packageJson.version
+  version: packageJson.version,
+  configDir: process.env.ALI_AUTH_DIR,
 });
 
-// Set up main program
 program
   .name('ali')
-  .description('Ali CLI - A powerful CLI with OAuth 2.0 authentication')
-  .version(packageJson.version, '-v, --version', 'display version number');
+  .description('Example CLI with embedded OAuth 2.0 PKCE authentication')
+  .version(packageJson.version);
 
-// Add authentication commands using the library
-authLib.addAuthCommands(program);
+auth.addAuthCommands(program);
 
-// Add some custom commands specific to Ali CLI
 program
   .command('hello')
-  .description('Say hello!')
-  .option('-n, --name <name>', 'Name to greet', 'World')
-  .action((options) => {
-    console.log(chalk.blue(`👋 Hello, ${options.name}!`));
-    console.log(chalk.gray('This is the Ali CLI with integrated OAuth authentication.'));
-    console.log(chalk.yellow('\n💡 Use "ali login" to authenticate before using protected commands.'));
+  .description('run a public command')
+  .option('-n, --name <name>', 'name to greet', 'World')
+  .action((options: { name: string }) => {
+    console.log(chalk.blue(`Hello, ${options.name}!`));
+    console.log(chalk.gray('Use "ali auth login" before running protected commands.'));
   });
 
 program
   .command('profile')
-  .description('Show user profile (requires authentication)')
+  .description('show the authenticated user profile')
   .action(async () => {
-    console.log(chalk.blue('👤 User Profile'));
-    console.log(chalk.gray('Checking authentication status...'));
-    
-    try {
-      // Use the library's whoami function
-      await authLib.whoami();
-    } catch (error) {
-      console.log(chalk.red('❌ Please authenticate first with: ali login'));
+    const user = await auth.getUserInfo();
+    if (!user) {
+      throw new Error('Authentication is required. Run: ali auth login');
     }
+    console.log(JSON.stringify(user, null, 2));
   });
 
 program
   .command('protected')
-  .description('Example protected command that requires authentication')
+  .description('run an example protected command')
   .action(async () => {
-    console.log(chalk.blue('🔒 Protected Command'));
-    console.log(chalk.gray('This command requires authentication...'));
-    
-    try {
-      // Check authentication status first
-      await authLib.status();
-      
-      console.log(chalk.green('\n✅ Authentication verified!'));
-      console.log(chalk.cyan('🎉 You have access to this protected feature!'));
-      console.log(chalk.gray('This is where your protected functionality would go.'));
-      
-    } catch (error) {
-      console.log(chalk.red('\n❌ Authentication required. Please run: ali login'));
-    }
+    await auth.getAccessToken();
+    console.log(chalk.green('Authentication verified. Protected operation can continue.'));
   });
 
 program
   .command('publish')
-  .description('Publish content using authenticated API calls')
-  .argument('<type>', 'Type of content to publish (e.g., image, document)')
-  .argument('<path>', 'Path to the content file')
+  .description('make a mock authenticated publish request')
+  .argument('<type>', 'content type')
+  .argument('<path>', 'content path')
   .option('--api-url <url>', 'API endpoint URL', 'https://api.example.com/v1/publish')
-  .option('--dry-run', 'Show what would be published without actually doing it')
-  .action(async (type, filePath, options) => {
-    console.log(chalk.blue(`📤 Publishing ${type}: ${filePath}`));
-    
-    try {
-      // Get the bearer token for API authentication
-      const bearerToken = await authLib.getBearerToken();
-      console.log(chalk.gray('✓ Authentication token obtained'));
-      
-      if (options.dryRun) {
-        console.log(chalk.yellow('🔍 Dry run mode - showing what would be published:'));
-        console.log(chalk.gray(`  Type: ${type}`));
-        console.log(chalk.gray(`  File: ${filePath}`));
-        console.log(chalk.gray(`  API URL: ${options.apiUrl}`));
-        console.log(chalk.gray(`  Authorization: Bearer ${bearerToken.substring(0, 20)}...`));
-        return;
-      }
-      
-      // Simulate API call with bearer token
-      console.log(chalk.gray(`Making API call to ${options.apiUrl}...`));
-      
-      // Example API call using fetch or axios
-      const response = await makeAPICall(options.apiUrl + `/${type}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': bearerToken,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          type: type,
-          filePath: filePath,
-          timestamp: new Date().toISOString()
-        })
-      });
-      
-      console.log(chalk.green(`✅ Successfully published ${type}!`));
-      console.log(chalk.gray(`Response: ${response.status || 'OK'}`));
-      
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('not authenticated')) {
-        console.log(chalk.red('❌ Authentication required. Please run: ali login'));
-      } else if (errorMessage.includes('expired')) {
-        console.log(chalk.red('❌ Token expired. Please run: ali auth refresh'));
-      } else {
-        console.log(chalk.red('❌ Publish failed:'), errorMessage);
-      }
-      process.exit(1);
+  .option('--dry-run', 'show the request without sending it')
+  .action(async (
+    type: string,
+    filePath: string,
+    options: { apiUrl: string; dryRun?: boolean }
+  ) => {
+    const bearerToken = await auth.getBearerToken();
+    const payload = {
+      type,
+      filePath,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (options.dryRun) {
+      console.log(JSON.stringify({
+        url: `${options.apiUrl}/${type}`,
+        authorization: 'Bearer <redacted>',
+        payload,
+      }, null, 2));
+      return;
     }
+
+    const result = await makeMockApiCall(`${options.apiUrl}/${type}`, payload, bearerToken);
+    console.log(chalk.green(`Published ${type}: ${result.status}`));
   });
 
-// Mock API call function (replace with actual HTTP client in real usage)
-async function makeAPICall(url: string, options: { method: string; headers: Record<string, string>; body: string }): Promise<{ status: string }> {
-  console.log(chalk.gray(`🌐 POST ${url}`));
-  console.log(chalk.gray(`📋 Headers: ${JSON.stringify(options.headers, null, 2)}`));
-  console.log(chalk.gray(`📦 Body: ${options.body}`));
-  
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // Mock successful response
+async function makeMockApiCall(
+  url: string,
+  payload: Record<string, string>,
+  bearerToken: string
+): Promise<{ status: string }> {
+  if (!bearerToken.startsWith('Bearer ')) {
+    throw new Error('Bearer token is missing');
+  }
+  console.log(chalk.gray(`Mock POST ${url}`));
+  console.log(chalk.gray(`Payload keys: ${Object.keys(payload).join(', ')}`));
   return { status: '201 Created' };
 }
 
-// Custom help with branding
-program.configureHelp({
-  sortSubcommands: true,
-  subcommandTerm: (cmd) => cmd.name() + ' ' + cmd.usage()
-});
-
-// ASCII art for Ali CLI
 const ALI_LOGO = `
    ___   __    ____
   /   | / /   /  _/
- / /| |/ /    / /  
-/ ___ / /   _/ /   
-/_/  |_/   /___/   
-
-OAuth 2.0 PKCE Authentication
+ / /| |/ /    / /
+/ ___ / /   _/ /
+/_/  |_/   /___/
 `;
+program.addHelpText('beforeAll', chalk.cyan(ALI_LOGO));
 
-// Override help to show logo
-const originalHelp = program.help;
-program.help = function(options?: any) {
-  console.log(chalk.cyan(ALI_LOGO));
-  return originalHelp.call(this, options);
-};
-
-// Parse command line arguments
-program.parse();
-
-// Show help if no command provided
-if (!process.argv.slice(2).length) {
-  program.outputHelp();
+async function main(): Promise<void> {
+  try {
+    if (process.argv.length === 2) {
+      program.outputHelp();
+      return;
+    }
+    await program.parseAsync();
+  } catch (error) {
+    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+    process.exitCode = 1;
+  }
 }
+
+void main();

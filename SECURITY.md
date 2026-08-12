@@ -1,386 +1,65 @@
-# 🔒 Security Guide
+# Security policy
 
-This document provides comprehensive information about security considerations, token storage mechanisms, and best practices for auth-pkce.
+## Reporting a vulnerability
 
-## 📋 Table of Contents
+Please report vulnerabilities privately through [GitHub Security Advisories](https://github.com/alishah730/auth-pkce/security/advisories/new). Do not open a public issue with tokens, client configuration, exploit details, or provider logs.
 
-- [Token Storage Architecture](#token-storage-architecture)
-- [File System Security](#file-system-security)
-- [Token Lifecycle Management](#token-lifecycle-management)
-- [Security Best Practices](#security-best-practices)
-- [Threat Model](#threat-model)
-- [Security Auditing](#security-auditing)
-- [Compliance](#compliance)
+Include the affected version, Node.js version, operating system, reproduction steps, and expected impact. Never include live credentials.
 
-## 🏗️ Token Storage Architecture
+## Security properties
 
-### Storage Location
+The library:
 
-auth-pkce stores all sensitive data in a dedicated directory within the user's home directory:
+- generates a 32-byte random PKCE verifier and uses `S256`;
+- generates and validates a random OAuth state value;
+- accepts callback traffic only on a configured loopback host, port, and path;
+- validates exact OpenID Connect issuer equality;
+- requires HTTPS for provider URLs, except HTTP loopback development issuers;
+- applies request and callback timeouts;
+- refreshes shortly before expiry and coalesces concurrent refreshes;
+- uses the advertised `revocation_endpoint` when available;
+- passes clipboard content through stdin rather than shell interpolation;
+- writes config/tokens atomically with `0700`/`0600` POSIX permissions.
 
-```
-~/.auth-pkce/
-├── config.json      # OAuth configuration (non-sensitive)
-├── tokens.json      # Access/refresh tokens (highly sensitive)
-└── logs/            # Application logs
-    ├── combined.log # All log levels
-    └── error.log    # Error logs only
-```
+The implementation follows [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252), and [OpenID Connect Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html) for the supported flow.
 
-### Token Storage Format
+## Important limits
 
-Tokens are stored in JSON format with the following structure:
+- `tokens.json` is plaintext. File permissions are access control, not encryption.
+- POSIX modes do not provide equivalent guarantees on every Windows/filesystem configuration.
+- An attacker running as the same OS user, malware, an administrator, or a backup reader may recover tokens.
+- The package does not use macOS Keychain, Windows Credential Manager, or Linux Secret Service.
+- ID tokens may be retained from the token response, but the library does not expose decoded ID-token claims as trusted identity. `getUserInfo()` calls the provider’s UserInfo endpoint.
+- Remote revocation is best effort. Local tokens are removed even when the provider has no revocation endpoint or the request fails.
+- This package is not a confidential-client secret store and should not be given a client secret in a distributed CLI.
 
-```json
-{
-  "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refreshToken": "def50200a1b2c3d4e5f6...",
-  "idToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expiresAt": 1703123456789,
-  "tokenType": "Bearer",
-  "scope": "openid profile email"
-}
-```
+Choose an OS credential-vault-backed solution if filesystem token storage is not appropriate for your threat model.
 
-**Field Descriptions:**
-- `accessToken`: JWT access token for API authentication
-- `refreshToken`: Long-lived token for obtaining new access tokens
-- `idToken`: OpenID Connect identity token (optional)
-- `expiresAt`: Unix timestamp when the access token expires
-- `tokenType`: Token type (typically "Bearer")
-- `scope`: Granted OAuth scopes
+## Storage
 
-## 🛡️ File System Security
+The default directory is `~/.auth-pkce`. Override it with a constructor `configDir` or `AUTH_PKCE_CONFIG_DIR`.
 
-### File Permissions
-
-auth-pkce implements strict file permissions to protect sensitive data:
-
-| File/Directory | Permissions | Octal | Description |
-|---------------|-------------|-------|-------------|
-| `~/.auth-pkce/` | `drwx------` | 700 | Owner read/write/execute only |
-| `config.json` | `-rw-------` | 600 | Owner read/write only |
-| `tokens.json` | `-rw-------` | 600 | Owner read/write only |
-| `logs/` | `drwx------` | 700 | Owner read/write/execute only |
-
-### Permission Enforcement
-
-The application automatically sets restrictive permissions during file operations:
-
-```typescript
-// Directory creation with secure permissions
-await fs.ensureDir(CONFIG_DIR);
-await fs.chmod(CONFIG_DIR, 0o700);
-
-// File creation with secure permissions
-await fs.writeJson(TOKENS_FILE, tokens, { spaces: 2 });
-await fs.chmod(TOKENS_FILE, 0o600);
+```text
+config.json  OAuth issuer/client/redirect configuration
+tokens.json  access, refresh, and optional ID tokens
 ```
 
-### Cross-Platform Considerations
-
-**Unix-like Systems (Linux, macOS):**
-- Full POSIX permission support
-- Effective user/group/other permission isolation
-- File system ACLs respected where available
-
-**Windows:**
-- NTFS permissions mapped to closest equivalent
-- User-only access enforced through Windows security descriptors
-- Inheritance disabled for sensitive files
-
-## 🔄 Token Lifecycle Management
-
-### Token Acquisition
-
-1. **PKCE Challenge Generation**
-   ```typescript
-   // Cryptographically secure random code verifier (43-128 chars)
-   const codeVerifier = crypto.randomBytes(32).toString('base64url');
-   
-   // SHA256 hash of code verifier
-   const codeChallenge = crypto
-     .createHash('sha256')
-     .update(codeVerifier)
-     .digest('base64url');
-   ```
-
-2. **Authorization Flow**
-   - User redirected to OAuth provider
-   - Authorization code received via callback
-   - Code exchanged for tokens using PKCE verifier
-
-3. **Secure Storage**
-   - Tokens immediately stored with restrictive permissions
-   - Temporary variables cleared from memory
-   - Callback server closed after successful exchange
-
-### Token Validation
-
-Before each use, tokens undergo validation:
-
-```typescript
-// Expiration check
-const isExpired = Date.now() >= storedTokens.expiresAt;
-
-// Automatic refresh if expired and refresh token available
-if (isExpired && storedTokens.refreshToken) {
-  const newTokens = await oauthClient.refreshToken(storedTokens.refreshToken);
-  await configManager.saveTokens(newTokens);
-}
-```
-
-### Token Refresh
-
-1. **Automatic Refresh**
-   - Triggered when access token is expired
-   - Uses stored refresh token
-   - Updates stored tokens atomically
-
-2. **Manual Refresh**
-   - Available via `auth-pkce refresh` command
-   - Validates refresh token before use
-   - Provides clear error messages for expired refresh tokens
-
-### Token Revocation
-
-1. **Logout Process**
-   ```typescript
-   // Attempt to revoke tokens at provider
-   await oauthClient.revokeToken(accessToken, 'access_token');
-   await oauthClient.revokeToken(refreshToken, 'refresh_token');
-   
-   // Clear local storage regardless of revocation success
-   await configManager.clearTokens();
-   ```
-
-2. **Cleanup Strategy**
-   - Remote revocation attempted first
-   - Local cleanup always performed
-   - Graceful handling of network failures
-
-## 🔐 Security Best Practices
-
-### PKCE Implementation
-
-auth-pkce implements OAuth 2.0 PKCE (RFC 7636) with the following security measures:
-
-**Code Verifier Generation:**
-- Uses Node.js `crypto.randomBytes()` for cryptographic randomness
-- 256-bit entropy (32 bytes)
-- Base64url encoding for URL safety
-
-**Code Challenge:**
-- SHA256 hash of code verifier
-- S256 method (most secure option)
-- Base64url encoded for transmission
-
-**State Parameter:**
-- Cryptographically random 128-bit value
-- CSRF protection during authorization flow
-- Validated on callback to prevent attacks
-
-### Memory Security
-
-**Sensitive Data Handling:**
-- Tokens stored in variables for minimal time
-- No logging of sensitive values
-- Automatic garbage collection of temporary objects
-
-**Process Isolation:**
-- Each CLI invocation runs in isolated process
-- No shared memory between invocations
-- Clean process exit after operations
-
-### Network Security
-
-**HTTPS Enforcement:**
-- All OAuth endpoints must use HTTPS
-- Certificate validation enabled
-- No fallback to HTTP for sensitive operations
-
-**Request Security:**
-- User-Agent header identifies the client
-- Timeout protection against hanging requests
-- Proper error handling for network failures
-
-## 🎯 Threat Model
-
-### Threats Mitigated
-
-| Threat | Mitigation | Implementation |
-|--------|------------|----------------|
-| **Token Theft via File Access** | Restrictive file permissions | 600 permissions, user-only access |
-| **CSRF Attacks** | State parameter validation | Cryptographic state generation/validation |
-| **Code Interception** | PKCE implementation | SHA256 code challenge/verifier |
-| **Token Replay** | Expiration validation | Automatic expiry checking |
-| **Privilege Escalation** | Minimal permissions | Least-privilege file access |
-| **Network Interception** | HTTPS enforcement | TLS validation required |
-| **Process Memory Dumps** | Minimal memory exposure | Short-lived sensitive variables |
-
-### Residual Risks
-
-| Risk | Likelihood | Impact | Mitigation Strategy |
-|------|------------|--------|-------------------|
-| **Root/Admin Access** | Low | High | User education, system hardening |
-| **Malware on System** | Medium | High | Antivirus, system monitoring |
-| **Physical Access** | Low | Medium | Disk encryption, screen locks |
-| **Backup Exposure** | Medium | Medium | Secure backup practices |
-
-## 🔍 Security Auditing
-
-### Log Analysis
-
-auth-pkce provides comprehensive logging for security monitoring:
-
-**Security Events Logged:**
-- Authentication attempts (success/failure)
-- Token refresh operations
-- Configuration changes
-- Network errors and timeouts
-- File permission changes
-
-**Log Locations:**
-```
-~/.auth-pkce/logs/
-├── combined.log    # All events with timestamps
-└── error.log       # Error events only
-```
-
-**Log Format:**
-```json
-{
-  "level": "info",
-  "message": "Authentication successful",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "service": "auth-pkce"
-}
-```
-
-### Monitoring Recommendations
-
-**File System Monitoring:**
-```bash
-# Monitor token file access (Linux/macOS)
-sudo auditctl -w ~/.auth-pkce/tokens.json -p rwa -k auth-pkce-tokens
-
-# Check file permissions regularly
-ls -la ~/.auth-pkce/
-```
-
-**Process Monitoring:**
-```bash
-# Monitor auth-pkce process execution
-ps aux | grep auth-pkce
-
-# Check for unusual network connections
-netstat -an | grep :8080
-```
-
-## 📊 Compliance
-
-### Standards Compliance
-
-**OAuth 2.0 Security Best Current Practice:**
-- Implements RFC 8252 recommendations
-- Uses PKCE for all authorization flows
-- Enforces HTTPS for all endpoints
-- Validates state parameters
-
-**PKCE Specification (RFC 7636):**
-- SHA256 code challenge method
-- Cryptographically random code verifiers
-- Proper code challenge derivation
-- Secure code verifier transmission
-
-### Security Certifications
-
-While auth-pkce is not formally certified, it follows security practices aligned with:
-
-- **OWASP OAuth 2.0 Security Guidelines**
-- **NIST Cybersecurity Framework**
-- **ISO 27001 Information Security Controls**
-
-## 🚨 Security Incident Response
-
-### Suspected Token Compromise
-
-1. **Immediate Actions:**
-   ```bash
-   # Revoke all tokens immediately
-   auth-pkce logout
-   
-   # Remove all stored data
-   rm -rf ~/.auth-pkce/
-   
-   # Re-authenticate with new tokens
-   auth-pkce configure
-   auth-pkce login
-   ```
-
-2. **Investigation Steps:**
-   - Check system logs for unauthorized access
-   - Review auth-pkce logs for suspicious activity
-   - Verify file permissions and ownership
-   - Scan system for malware
-
-3. **Recovery Process:**
-   - Change OAuth client credentials if possible
-   - Re-configure auth-pkce with new settings
-   - Monitor for continued suspicious activity
-
-### Reporting Security Issues
-
-**Report Security Issues:**
-- Email: security@auth-pkce.dev
-- Use GitHub Security Advisories for responsible disclosure
-- Include detailed reproduction steps
-- Allow 90 days for fix before public disclosure
-
-**For security questions:**
-- Use GitHub Discussions with "security" tag at https://github.com/alishah730/auth-pkce/discussions
-- Check existing documentation first
-- Provide context about your use case
-
-## 🔧 Security Configuration
-
-### Hardening Options
-
-**Environment Variables:**
-```bash
-# Increase log verbosity for security monitoring
-export LOG_LEVEL=debug
-
-# Custom config directory (more secure location)
-export AUTH_PKCE_CONFIG_DIR=/secure/path/.auth-pkce
-
-# Network timeout settings
-export AUTH_PKCE_TIMEOUT=30000
-```
-
-**System-Level Hardening:**
-- Enable disk encryption (FileVault, BitLocker, LUKS)
-- Use secure DNS (DoH/DoT)
-- Keep system and dependencies updated
-- Enable firewall and intrusion detection
-
-### Security Checklist
-
-- [ ] Verify file permissions are 600/700
-- [ ] Confirm HTTPS-only OAuth endpoints
-- [ ] Check token expiration handling
-- [ ] Review log files for anomalies
-- [ ] Validate PKCE implementation
-- [ ] Test token revocation process
-- [ ] Verify state parameter validation
-- [ ] Confirm secure random generation
-- [ ] Check network timeout handling
-- [ ] Validate error message security
-
----
-
-**Last Updated:** 2024-01-15  
-**Version:** 1.0.0  
-**Reviewed By:** Security Team
-
-For questions about this security guide, please contact security@auth-pkce.dev or open a GitHub Discussion.
+Do not commit, copy into bug reports, or print these files. The `token --show` option intentionally discloses an access token to stdout and should be used only when required.
+
+## Operational guidance
+
+- Request the smallest scopes your CLI needs.
+- Prefer short-lived access tokens and refresh-token rotation at the provider.
+- Use a separate public client registration per application/environment.
+- Isolate stores with `configDir` when CLIs should not share credentials.
+- Keep Node.js and this package updated.
+- Protect home-directory backups and use full-disk encryption.
+- Set `AUTH_PKCE_LOG_LEVEL` only while diagnosing a problem; review stderr before sharing it.
+
+## Suspected compromise
+
+1. Revoke the session/tokens at the identity provider.
+2. Run `auth-pkce logout` (or the embedded CLI’s `auth logout`).
+3. Remove the affected token store.
+4. Check the host for malware or unauthorized access.
+5. Authenticate again only after the host is trusted.

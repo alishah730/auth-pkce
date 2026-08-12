@@ -1,148 +1,50 @@
-# Ali CLI - Example using auth-pkce Library
+# ali-cli local integration example
 
-This is an example CLI project demonstrating how to integrate the `auth-pkce` library into your own Node.js CLI application.
+This is the canonical minimal example for embedding `auth-pkce` in an existing Commander CLI. Its dependency is `"auth-pkce": "file:../.."`, so it consumes the repository’s local package.
 
-## Features
+## Build and smoke test
 
-The Ali CLI inherits all authentication commands from auth-pkce:
-- `ali auth configure` - Configure OAuth settings
-- `ali login` - Authenticate using OAuth 2.0 PKCE flow  
-- `ali logout` - Logout and clear stored tokens
-- `ali whoami` - Display current user information
-- `ali auth refresh` - Refresh access token
-- `ali auth status` - Show authentication status
-- `ali auth token` - Display access token
-
-Plus custom commands:
-- `ali hello` - Say hello (public command)
-- `ali profile` - Show user profile (requires authentication)
-- `ali protected` - Example protected command
-- `ali publish <type> <path>` - Publish content using authenticated API calls
-
-## Installation
+From the repository root:
 
 ```bash
-# Install dependencies
-npm install
-
-# Build the project  
+npm ci
 npm run build
+npm ci --prefix examples/ali-cli
+npm run build --prefix examples/ali-cli
 
-# Install globally to use the 'ali' command
-npm install -g .
+node examples/ali-cli/dist/cli.js --help
+node examples/ali-cli/dist/cli.js hello --name Local
+node examples/ali-cli/dist/cli.js auth --help
 ```
 
-## Usage
+These commands require no OAuth provider and are the fastest way to confirm local package exports, types, command registration, and runtime loading.
 
-### 1. Configure OAuth Settings
+## Real login test
+
+Register a public OAuth client with a redirect such as `http://127.0.0.1:8080/callback`, then isolate test credentials:
 
 ```bash
+export ALI_AUTH_DIR="$(mktemp -d)"
+
+node examples/ali-cli/dist/cli.js auth configure
+node examples/ali-cli/dist/cli.js auth login
+node examples/ali-cli/dist/cli.js auth status
+node examples/ali-cli/dist/cli.js profile
+node examples/ali-cli/dist/cli.js protected
+```
+
+The available auth commands are under `ali auth` so they do not collide with the host application:
+
+```text
 ali auth configure
-```
-
-### 2. Authenticate
-
-```bash  
-ali login
-```
-
-### 3. Use Commands
-
-```bash
-# Public command
-ali hello --name "Developer"
-
-# Protected commands (require authentication)
-ali profile
-ali protected
-
-# Publish content with API calls using bearer token
-ali publish image ./my-image.jpg
-ali publish document ./report.pdf --api-url https://api.myservice.com/v1/upload
-
-# Test API calls without actually publishing
-ali publish image ./test.jpg --dry-run
-
-# Check authentication status
+ali auth login
+ali auth logout
+ali auth whoami
+ali auth refresh
 ali auth status
+ali auth token
 ```
 
-## Development
+`hello` is public. `profile`, `protected`, and `publish` use the library API. `publish --dry-run` redacts the authorization header, and the non-dry-run operation is a mock—it does not send data to the example URL.
 
-```bash
-# Run in development mode
-npm run dev
-
-# Build
-npm run build
-```
-
-## How It Works
-
-The Ali CLI uses the `auth-pkce` library in two ways:
-
-### Method 1: Adding Commands to Existing CLI (Recommended)
-
-```typescript
-import { AuthPKCELibrary } from 'auth-pkce';
-
-const program = new Command();
-const authLib = new AuthPKCELibrary({
-  cliName: 'ali',
-  version: '1.0.0'
-});
-
-// Add all auth commands to your existing CLI
-authLib.addAuthCommands(program);
-```
-
-### Method 2: Using Individual Functions
-
-```typescript
-import { AuthPKCELibrary } from 'auth-pkce';
-
-const authLib = new AuthPKCELibrary();
-
-// Call individual auth functions
-await authLib.login();
-await authLib.whoami();
-await authLib.status();
-
-// Get bearer token for API calls
-const bearerToken = await authLib.getBearerToken();
-// Use bearerToken in your API calls
-```
-
-### Method 3: Creating a New CLI
-
-```typescript
-import { AuthPKCELibrary } from 'auth-pkce';
-
-const authLib = new AuthPKCELibrary({
-  cliName: 'my-cli',
-  version: '1.0.0'
-});
-
-// Create a complete CLI with auth commands
-const program = authLib.createCLI();
-```
-
-## Library Options
-
-```typescript
-interface AuthPKCELibraryOptions {
-  cliName?: string;      // Custom CLI name for branding
-  version?: string;      // Custom version
-  suppressColors?: boolean; // Disable colored output
-  silent?: boolean;      // Suppress all console output
-}
-```
-
-## Configuration
-
-The library uses the same configuration as the standalone auth-pkce CLI:
-- Configuration: `~/.auth-pkce/config.json`
-- Tokens: `~/.auth-pkce/tokens.json` 
-- Logs: `~/.auth-pkce/logs/`
-
-This means you can switch between different CLIs that use auth-pkce seamlessly!
+The integration itself is in [src/cli.ts](src/cli.ts).

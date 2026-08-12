@@ -1,44 +1,50 @@
-import winston from 'winston';
-import path from 'path';
-import os from 'os';
-import fs from 'fs-extra';
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 
-const LOG_DIR = path.join(os.homedir(), '.auth-pkce', 'logs');
+type Metadata = Record<string, unknown>;
 
-// Ensure log directory exists
-fs.ensureDirSync(LOG_DIR);
+const priorities: Record<LogLevel, number> = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+};
 
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'auth-pkce' },
-  transports: [
-    new winston.transports.File({
-      filename: path.join(LOG_DIR, 'error.log'),
-      level: 'error',
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    }),
-    new winston.transports.File({
-      filename: path.join(LOG_DIR, 'combined.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
-    }),
-  ],
-});
-
-// Add console transport for development
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }));
+function configuredLevel(): LogLevel | null {
+  const value = process.env.AUTH_PKCE_LOG_LEVEL?.toLowerCase();
+  return value && value in priorities ? value as LogLevel : null;
 }
+
+function normalize(value: unknown): unknown {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+      cause: value.cause,
+    };
+  }
+
+  return value;
+}
+
+function write(level: LogLevel, message: string, metadata: Metadata = {}): void {
+  const threshold = configuredLevel();
+  if (!threshold || priorities[level] > priorities[threshold]) {
+    return;
+  }
+
+  const normalized = Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => [key, normalize(value)])
+  );
+  const details = Object.keys(normalized).length > 0 ? ` ${JSON.stringify(normalized)}` : '';
+  process.stderr.write(`[auth-pkce:${level}] ${message}${details}\n`);
+}
+
+const logger = {
+  error: (message: string, metadata?: Metadata): void => write('error', message, metadata),
+  warn: (message: string, metadata?: Metadata): void => write('warn', message, metadata),
+  info: (message: string, metadata?: Metadata): void => write('info', message, metadata),
+  debug: (message: string, metadata?: Metadata): void => write('debug', message, metadata),
+};
 
 export default logger;

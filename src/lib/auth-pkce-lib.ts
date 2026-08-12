@@ -1,287 +1,150 @@
 import { Command } from 'commander';
-import { 
+import { AuthPkceApi } from '../api';
+import {
+  AuthCommandContext,
   configureCommand,
   loginCommand,
   logoutCommand,
-  whoamiCommand,
   refreshCommand,
   statusCommand,
-  tokenCommand
+  tokenCommand,
+  whoamiCommand,
 } from '../commands';
+import { ConfigManager } from '../config/manager';
+import { UserInfo } from '../types';
 
 export interface AuthPKCELibraryOptions {
-  /** Custom CLI name for branded output */
   cliName?: string;
-  /** Custom version for version command */
   version?: string;
-  /** Suppress colored output */
-  suppressColors?: boolean;
-  /** Silent mode - suppress console output */
-  silent?: boolean;
+  /** Command group added to a host CLI. Set false to add commands at the root. */
+  commandGroup?: string | false;
+  /** Isolate credentials for this CLI. Defaults to AUTH_PKCE_CONFIG_DIR or ~/.auth-pkce. */
+  configDir?: string;
+  autoRefresh?: boolean;
 }
 
 export class AuthPKCELibrary {
-  private options: AuthPKCELibraryOptions;
-  private originalLog: typeof console.log;
-  private originalError: typeof console.error;
+  private readonly options: Required<Omit<AuthPKCELibraryOptions, 'configDir'>> & {
+    configDir?: string;
+  };
+  private readonly configManager: ConfigManager;
+  private readonly api: AuthPkceApi;
 
-  constructor(options: AuthPKCELibraryOptions = {}) {
+  public constructor(options: AuthPKCELibraryOptions = {}) {
     this.options = {
-      cliName: 'auth-pkce',
-      version: '1.0.0',
-      suppressColors: false,
-      silent: false,
-      ...options
+      cliName: options.cliName ?? 'auth-pkce',
+      version: options.version ?? '0.0.0',
+      commandGroup: options.commandGroup ?? 'auth',
+      configDir: options.configDir,
+      autoRefresh: options.autoRefresh ?? true,
     };
-
-    // Store original console methods
-    this.originalLog = console.log;
-    this.originalError = console.error;
+    this.configManager = options.configDir
+      ? new ConfigManager({ configDir: options.configDir })
+      : ConfigManager.getInstance();
+    this.api = new AuthPkceApi({
+      autoRefresh: this.options.autoRefresh,
+      configDir: this.configManager.getConfigDir(),
+    });
   }
 
-  /**
-   * Setup silence mode if enabled
-   */
-  private setupSilentMode(): () => void {
-    if (this.options.silent) {
-      console.log = (): void => {};
-      console.error = (): void => {};
-    }
-
-    // Return cleanup function
-    return (): void => {
-      console.log = this.originalLog;
-      console.error = this.originalError;
+  private commandContext(): AuthCommandContext {
+    const group = this.options.commandGroup === false ? '' : ` ${this.options.commandGroup}`;
+    return {
+      commandName: `${this.options.cliName}${group}`,
+      configManager: this.configManager,
     };
   }
 
-  /**
-   * Add auth commands to an existing Commander program
-   */
   public addAuthCommands(program: Command): void {
-    // Auth group commands
-    const authCommand = program
-      .command('auth')
-      .description('Authentication commands');
+    const parent = this.options.commandGroup === false
+      ? program
+      : program.command(this.options.commandGroup).description('Authentication commands');
+    const context = this.commandContext();
 
-    // Configure command
-    authCommand
+    parent
       .command('configure')
       .alias('config')
       .description('configure OAuth settings interactively')
-      .option('-b, --base-url <url>', 'OAuth provider base URL')
-      .action(async (options) => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await configureCommand(options);
-        } finally {
-          cleanup();
-        }
-      });
+      .option('-b, --base-url <url>', 'OpenID Connect issuer URL')
+      .action(async (options: { baseUrl?: string }) => configureCommand(options, context));
 
-    // Login command
-    program
-      .command('login')
-      .description('authenticate using OAuth 2.0 PKCE flow')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await loginCommand();
-        } finally {
-          cleanup();
-        }
-      });
-
-    // Logout command
-    program
-      .command('logout')
-      .description('logout and clear stored tokens')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await logoutCommand();
-        } finally {
-          cleanup();
-        }
-      });
-
-    // Whoami command
-    program
-      .command('whoami')
-      .description('display current user information')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await whoamiCommand();
-        } finally {
-          cleanup();
-        }
-      });
-
-    // Refresh command
-    authCommand
-      .command('refresh')
-      .description('refresh access token using refresh token')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await refreshCommand();
-        } finally {
-          cleanup();
-        }
-      });
-
-    // Status command
-    authCommand
-      .command('status')
-      .description('show current authentication status')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await statusCommand();
-        } finally {
-          cleanup();
-        }
-      });
-
-    // Token command
-    authCommand
-      .command('token')
-      .description('display access token and copy to clipboard')
-      .action(async () => {
-        const cleanup = this.setupSilentMode();
-        try {
-          await tokenCommand();
-        } finally {
-          cleanup();
-        }
-      });
+    parent.command('login').description('authenticate using Authorization Code + PKCE')
+      .action(async () => loginCommand(context));
+    parent.command('logout').description('revoke tokens when supported and clear local tokens')
+      .action(async () => logoutCommand(context));
+    parent.command('whoami').description('show user information from the UserInfo endpoint')
+      .action(async () => whoamiCommand(context));
+    parent.command('refresh').description('refresh the access token')
+      .action(async () => refreshCommand(context));
+    parent.command('status').description('show authentication status')
+      .action(async () => statusCommand(context));
+    parent.command('token').description('copy the current access token to the clipboard')
+      .option('--show', 'also print the token to stdout')
+      .action(async (options: { show?: boolean }) => tokenCommand(options, context));
   }
 
-  /**
-   * Create a new Commander program with auth commands
-   */
   public createCLI(): Command {
-    const program = new Command();
-
-    program
-      .name(this.options.cliName || 'cli')
-      .description(`CLI with OAuth 2.0 PKCE Authentication`)
-      .version(this.options.version || '1.0.0', '-v, --version', 'display version number');
-
+    const program = new Command()
+      .name(this.options.cliName)
+      .description('OAuth 2.0 Authorization Code + PKCE authentication')
+      .version(this.options.version);
     this.addAuthCommands(program);
-
     return program;
   }
 
-  /**
-   * Direct API access to auth commands
-   */
   public async configure(options: { baseUrl?: string } = {}): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await configureCommand(options);
-    } finally {
-      cleanup();
-    }
+    return configureCommand(options, this.commandContext());
   }
 
   public async login(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await loginCommand();
-    } finally {
-      cleanup();
-    }
+    return loginCommand(this.commandContext());
   }
 
   public async logout(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await logoutCommand();
-    } finally {
-      cleanup();
-    }
+    return logoutCommand(this.commandContext());
   }
 
   public async whoami(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await whoamiCommand();
-    } finally {
-      cleanup();
-    }
+    return whoamiCommand(this.commandContext());
   }
 
   public async refresh(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await refreshCommand();
-    } finally {
-      cleanup();
-    }
+    return refreshCommand(this.commandContext());
   }
 
   public async status(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await statusCommand();
-    } finally {
-      cleanup();
-    }
+    return statusCommand(this.commandContext());
   }
 
-  public async token(): Promise<void> {
-    const cleanup = this.setupSilentMode();
-    try {
-      await tokenCommand();
-    } finally {
-      cleanup();
-    }
+  public async token(options: { show?: boolean } = {}): Promise<void> {
+    return tokenCommand(options, this.commandContext());
   }
 
-  /**
-   * Get the access token as a string (for programmatic use)
-   */
+  public async isAuthenticated(): Promise<boolean> {
+    return this.api.isAuthenticated();
+  }
+
+  public async getUserInfo(): Promise<UserInfo | null> {
+    return this.api.getUserInfo();
+  }
+
   public async getAccessToken(): Promise<string> {
-    const { ConfigManager } = await import('../config/manager');
-    const configManager = ConfigManager.getInstance();
-    
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    if (!config || !tokens) {
-      throw new Error('Not authenticated. Please run login first.');
+    const token = await this.api.getAccessToken();
+    if (!token) {
+      throw new Error(`Not authenticated. Run: ${this.commandContext().commandName} login`);
     }
-    
-    // Check if token is expired
-    if (configManager.isTokenExpired(tokens)) {
-      throw new Error('Access token expired. Please run refresh or login.');
-    }
-    
-    return tokens.accessToken;
+    return token;
   }
 
-  /**
-   * Get the bearer token formatted for Authorization header
-   */
   public async getBearerToken(): Promise<string> {
-    const accessToken = await this.getAccessToken();
-    return `Bearer ${accessToken}`;
+    return `Bearer ${await this.getAccessToken()}`;
   }
 }
 
-/**
- * Factory function for quick setup
- */
 export function createAuthPKCE(options: AuthPKCELibraryOptions = {}): AuthPKCELibrary {
   return new AuthPKCELibrary(options);
 }
 
-/**
- * Quick helper to add auth commands to existing CLI
- */
 export function addAuthToCLI(program: Command, options: AuthPKCELibraryOptions = {}): void {
-  const authLib = new AuthPKCELibrary(options);
-  authLib.addAuthCommands(program);
+  new AuthPKCELibrary(options).addAuthCommands(program);
 }

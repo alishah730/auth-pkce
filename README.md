@@ -1,353 +1,160 @@
 # auth-pkce
 
-A secure Node.js CLI tool for OAuth 2.0 PKCE (Proof Key for Code Exchange) authentication flow.
+[![npm version](https://img.shields.io/npm/v/auth-pkce.svg)](https://www.npmjs.com/package/auth-pkce)
+[![CI](https://github.com/alishah730/auth-pkce/actions/workflows/ci.yml/badge.svg)](https://github.com/alishah730/auth-pkce/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-## Features
-
-- 🔐 **Secure PKCE Implementation**: Full OAuth 2.0 Authorization Code Flow with PKCE
-- 🌐 **OpenID Connect Discovery**: Automatic endpoint discovery from `.well-known/openid-configuration`
-- 🔧 **Interactive Configuration**: AWS CLI-style configuration management
-- 🗂️ **Secure Token Storage**: Encrypted token storage in user home directory
-- 🌍 **Browser Integration**: Automatic browser opening for authorization
-- 📝 **Comprehensive Logging**: Winston-based logging with multiple levels
-- 🎨 **Beautiful CLI**: Colorful output with ASCII art and intuitive commands
-- 🔄 **Token Refresh**: Automatic token refresh capabilities
-- 👤 **User Info**: Retrieve and display current user information
-- 🚪 **Secure Logout**: Token revocation and cleanup
-
-## Installation
-
-### Global Installation (Recommended)
-
-```bash
-npm install -g auth-pkce
-```
-
-### Local Installation
-
-```bash
-npm install auth-pkce
-```
-
-## Quick Start
-
-### 1. Configure OAuth Settings
-
-```bash
-auth-pkce configure
-```
-
-This will prompt you for:
-- OAuth provider base URL
-- Client ID
-- Redirect URI (default: `http://localhost:8080/callback`)
-- OAuth scopes (default: `openid profile email`)
-- Token exchange audience (optional, for WSO2 and similar providers)
-- Log level
-
-### 2. Authenticate
-
-```bash
-auth-pkce login
-```
-
-This will:
-- Open your default browser
-- Navigate to the OAuth authorization page
-- Handle the callback automatically
-- Store tokens securely
-
-### 3. Check Authentication Status
-
-```bash
-auth-pkce whoami
-```
-
-## Commands
-
-### Configuration
-
-```bash
-# Interactive configuration
-auth-pkce configure
-
-# Configure with base URL
-auth-pkce configure --base-url https://your-oauth-provider.com
-```
-
-### Authentication
-
-```bash
-# Login (start OAuth flow)
-auth-pkce login
-
-# Logout (revoke tokens and clear local storage)
-auth-pkce logout
-
-# Refresh access token
-auth-pkce refresh
-
-# Show current user information
-auth-pkce whoami
-
-# Show authentication status
-auth-pkce status
-
-# Display access token and copy to clipboard
-auth-pkce token
-```
-
-### Utility
-
-```bash
-# Show version and ASCII art
-auth-pkce version
-
-# Show help
-auth-pkce --help
-```
-
-## Configuration
-
-Configuration is stored in `~/.auth-pkce/config.json` with the following structure:
-
-```json
-{
-  "baseUrl": "https://your-oauth-provider.com",
-  "clientId": "your-client-id",
-  "redirectUri": "http://localhost:8080/callback",
-  "scope": "openid profile email",
-  "audience": "https://your-api-audience.com",
-  "logLevel": "info",
-  "configVersion": "1.0.0"
-}
-```
-
-### Security & Token Storage
-
-auth-pkce implements enterprise-grade security for token storage and management:
-
-**🗂️ Storage Location:**
-```
-~/.auth-pkce/
-├── config.json      # OAuth configuration (600 permissions)
-├── tokens.json      # Access/refresh tokens (600 permissions)
-└── logs/            # Application logs (700 permissions)
-```
-
-**🔐 File Permissions:**
-- **Directory**: `700` (owner read/write/execute only)
-- **Token Files**: `600` (owner read/write only)
-- **Cross-platform**: Windows NTFS permissions mapped appropriately
-
-**🛡️ Security Features:**
-- **PKCE Implementation**: SHA256 code challenge method with 256-bit entropy
-- **Secure Storage**: Restrictive file system permissions and atomic operations
-- **State Validation**: CSRF protection with cryptographically secure state parameter
-- **Token Lifecycle**: Automatic expiration validation and secure refresh
-- **Memory Security**: Minimal exposure with automatic cleanup
-- **Network Security**: HTTPS enforcement and certificate validation
-
-**📊 Token Storage Format:**
-```json
-{
-  "accessToken": "eyJhbGciOiJSUzI1NiIs...",
-  "refreshToken": "def50200a1b2c3d4e5f6...",
-  "idToken": "eyJhbGciOiJSUzI1NiIs...",
-  "expiresAt": 1703123456789,
-  "tokenType": "Bearer",
-  "scope": "openid profile email"
-}
-```
-
-**🔍 Threat Mitigation:**
-| Threat | Mitigation | Implementation |
-|--------|------------|----------------|
-| Token Theft | File permissions (600) | User-only access |
-| CSRF Attacks | State validation | Cryptographic state parameter |
-| Code Interception | PKCE S256 | SHA256 challenge/verifier |
-| Network Attacks | HTTPS enforcement | TLS validation required |
-| Memory Dumps | Minimal exposure | Short-lived variables |
-
-## OAuth 2.0 PKCE Flow
-
-This tool implements the OAuth 2.0 Authorization Code Flow with PKCE as specified in [RFC 7636](https://tools.ietf.org/html/rfc7636):
-
-1. **Code Verifier Generation**: Cryptographically random 43-128 character string
-2. **Code Challenge**: SHA256 hash of the code verifier, base64url encoded
-3. **Authorization Request**: Redirect to authorization server with code challenge
-4. **Authorization Code**: Receive authorization code via callback
-5. **Token Exchange**: Exchange authorization code + code verifier for tokens
+OAuth 2.0 Authorization Code + PKCE for Node.js command-line applications. Use it as a standalone auth utility, add a namespaced `auth` command to an existing [Commander](https://github.com/tj/commander.js/) CLI, or consume tokens through a small programmatic API.
 
 ## Requirements
 
-- Node.js >= 16.0.0
-- OAuth 2.0 provider with PKCE support
-- OpenID Connect discovery endpoint (`.well-known/openid-configuration`)
+- Node.js 22.13 or newer
+- A public OAuth client (do not put a client secret in a distributed CLI)
+- An OpenID Connect issuer with `/.well-known/openid-configuration`
+- PKCE with `S256`
+- A registered loopback redirect such as `http://127.0.0.1:8080/callback`
+
+The callback listener supports HTTP loopback addresses only: `127.0.0.1`, `::1`, and `localhost`. `127.0.0.1` is the recommended default.
+
+## Standalone CLI
+
+```bash
+npm install --global auth-pkce
+auth-pkce configure
+auth-pkce login
+auth-pkce status
+auth-pkce whoami
+```
+
+Other commands are `refresh`, `logout`, and `token`. `auth-pkce token` copies the token without printing it; add `--show` only when stdout disclosure is intentional.
+
+## Add auth to your CLI
+
+```bash
+npm install auth-pkce commander
+```
+
+```typescript
+import { Command } from 'commander';
+import { AuthPKCELibrary } from 'auth-pkce';
+
+const program = new Command().name('my-cli');
+const auth = new AuthPKCELibrary({
+  cliName: 'my-cli',
+  // Optional: isolate this CLI from the shared ~/.auth-pkce store.
+  configDir: process.env.MY_CLI_AUTH_DIR,
+});
+
+auth.addAuthCommands(program);
+
+program.command('deploy').action(async () => {
+  const bearerToken = await auth.getBearerToken(); // refreshes when needed
+  await fetch('https://api.example.com/deploy', {
+    method: 'POST',
+    headers: { Authorization: bearerToken },
+  });
+});
+
+await program.parseAsync();
+```
+
+Your CLI now has:
+
+```text
+my-cli auth configure
+my-cli auth login
+my-cli auth logout
+my-cli auth whoami
+my-cli auth refresh
+my-cli auth status
+my-cli auth token
+```
+
+Auth commands throw errors back to the host CLI; they never call `process.exit()`. Use `commandGroup: false` only when you intentionally want the commands at the root.
+
+## Programmatic API
+
+```typescript
+import { AuthPkceApi } from 'auth-pkce';
+
+const auth = new AuthPkceApi({
+  autoRefresh: true,
+  configDir: process.env.MY_CLI_AUTH_DIR,
+});
+
+const accessToken = await auth.getAccessToken();
+if (!accessToken) {
+  throw new Error('Run: my-cli auth login');
+}
+```
+
+Useful methods include `isAuthenticated()`, `getAccessToken()`, `getTokenInfo()`, `getUserInfo()`, `getAuthStatus()`, and `refreshToken()`.
+
+See [LIBRARY_USAGE.md](LIBRARY_USAGE.md) for API options and non-interactive configuration.
+
+## Test the local `ali-cli` example
+
+From the repository root:
+
+```bash
+npm ci
+npm run build
+npm ci --prefix examples/ali-cli
+npm run build --prefix examples/ali-cli
+
+node examples/ali-cli/dist/cli.js --help
+node examples/ali-cli/dist/cli.js hello --name Local
+node examples/ali-cli/dist/cli.js auth --help
+```
+
+To exercise a real provider without touching the default store:
+
+```bash
+export ALI_AUTH_DIR="$(mktemp -d)"
+node examples/ali-cli/dist/cli.js auth configure
+node examples/ali-cli/dist/cli.js auth login
+node examples/ali-cli/dist/cli.js protected
+```
+
+The example depends on `"auth-pkce": "file:../.."`, so it tests the local build instead of the published npm package. More detail is in [examples/ali-cli/README.md](examples/ali-cli/README.md).
+
+## Storage and security boundary
+
+By default, config and tokens are stored in `~/.auth-pkce/`. Set `configDir` or `AUTH_PKCE_CONFIG_DIR` to use another location.
+
+```text
+~/.auth-pkce/
+├── config.json   # 0600 on POSIX
+└── tokens.json   # 0600 on POSIX
+```
+
+Writes use a temporary file and rename, and the directory is `0700` on POSIX. Tokens are plaintext JSON, not encrypted or stored in an OS credential vault. Anyone who can act as the user or read the user’s files may be able to read them. See [SECURITY.md](SECURITY.md) before using the package in a high-risk environment.
+
+The library validates discovery issuer equality, callback state, redirect host/path, PKCE S256, and token expiry. It obtains user claims from the provider’s UserInfo endpoint; it does not treat a decoded, unverified ID token as trusted user information.
+
+## Provider compatibility
+
+`baseUrl` is the exact OpenID Connect issuer. For `https://login.example.com/tenant`, discovery is requested from:
+
+```text
+https://login.example.com/tenant/.well-known/openid-configuration
+```
+
+The returned `issuer` must match exactly. Providers that use a non-standard discovery URL can still be configured programmatically with explicit authorization/token/UserInfo endpoints; the interactive setup currently follows standard OpenID Connect discovery.
 
 ## Development
 
-### Setup
-
 ```bash
-# Clone repository
-git clone https://github.com/alishah730/auth-pkce.git
-cd auth-pkce
-
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run in development mode
-npm run dev
+npm ci
+npm run verify
 ```
 
-### Testing
+`verify` runs linting, type checking, built-artifact tests, both example builds, smoke tests, and `npm pack --dry-run`. The OAuth integration test binds temporary loopback ports.
 
-```bash
-# Run tests
-npm test
+- [Library guide](LIBRARY_USAGE.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [Issues](https://github.com/alishah730/auth-pkce/issues)
 
-# Run tests with coverage
-npm test -- --coverage
-
-# Lint code
-npm run lint
-
-# Fix linting issues
-npm run lint:fix
-```
-
-### Project Structure
-
-```
-src/
-├── cli.ts              # Main CLI entry point
-├── index.ts            # Library exports
-├── types/              # TypeScript type definitions
-├── config/             # Configuration management
-├── services/           # OAuth and OIDC services
-├── commands/           # CLI command implementations
-└── utils/              # Utility functions
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Configuration not found**
-```bash
-auth-pkce configure
-```
-
-**Token expired**
-```bash
-auth-pkce refresh
-# or
-auth-pkce login
-```
-
-**Browser doesn't open automatically**
-- The authorization URL will be displayed in the terminal
-- Copy and paste it into your browser manually
-
-**Network errors**
-- Check your internet connection
-- Verify the OAuth provider base URL
-- Ensure the provider supports PKCE
-
-### Logging
-
-Logs are stored in `~/.auth-pkce/logs/`:
-- `combined.log`: All log levels
-- `error.log`: Error logs only
-
-Set log level during configuration or via environment variable:
-```bash
-LOG_LEVEL=debug auth-pkce login
-```
-
-## Security Best Practices
-
-### For Users
-- **Never share** `~/.auth-pkce/` directory contents
-- **Use HTTPS-only** OAuth endpoints
-- **Enable disk encryption** (FileVault, BitLocker, LUKS)
-- **Keep auth-pkce updated** to the latest version
-- **Monitor logs** for suspicious activity in `~/.auth-pkce/logs/`
-
-### For Administrators
-- **Implement file system monitoring** for token access
-- **Use secure backup practices** for home directories
-- **Enable system audit logging** for security events
-- **Regular security updates** and patches
-
-### Security Incident Response
-
-**Suspected Token Compromise:**
-```bash
-# Immediate revocation and cleanup
-auth-pkce logout
-rm -rf ~/.auth-pkce/
-
-# Re-authenticate with fresh tokens
-auth-pkce configure
-auth-pkce login
-```
-
-**Report Security Issues:**
-- 📧 security@auth-pkce.dev
-- 🔒 GitHub Security Advisories
-- 📋 See [SECURITY.md](SECURITY.md) for comprehensive security guide
-
-### Compliance & Standards
-- ✅ **OAuth 2.0 Security Best Current Practice** (RFC 8252)
-- ✅ **PKCE Specification** (RFC 7636)
-- ✅ **OpenID Connect Security Guidelines**
-- ✅ **OWASP OAuth 2.0 Security Guidelines**
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- 📚 [Documentation](https://github.com/alishah730/auth-pkce/wiki)
-- 🐛 [Issue Tracker](https://github.com/alishah730/auth-pkce/issues)
-- 💬 [Discussions](https://github.com/alishah730/auth-pkce/discussions)
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history and updates.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-[⭐ Star us on GitHub](https://github.com/alishah730/auth-pkce) • [🐛 Report Issues](https://github.com/alishah730/auth-pkce/issues) • [💬 Join Discussions](https://github.com/alishah730/auth-pkce/discussions)
-
-[![npm version](https://badge.fury.io/js/auth-pkce.svg)](https://badge.fury.io/js/auth-pkce)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js CI](https://github.com/alishah730/auth-pkce/workflows/Node.js%20CI/badge.svg)](https://github.com/alishah730/auth-pkce/actions)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![OAuth 2.0](https://img.shields.io/badge/OAuth%202.0-PKCE-blue)](https://tools.ietf.org/html/rfc7636)
-![GitHub stars](https://img.shields.io/github/stars/alishah730/auth-pkce?style=social)
-![GitHub forks](https://img.shields.io/github/forks/alishah730/auth-pkce?style=social)
-![GitHub issues](https://img.shields.io/github/issues/alishah730/auth-pkce)
-![GitHub pull requests](https://img.shields.io/github/issues-pr/alishah730/auth-pkce)
+MIT © Ali Shah

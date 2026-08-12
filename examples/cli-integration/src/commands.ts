@@ -33,9 +33,9 @@ export class Commands {
       } else {
         console.log(chalk.red('❌ System not authenticated'));
         if (!authStatus.hasConfig) {
-          console.log(chalk.yellow('💡 Run "auth-pkce configure" first, then "auth-pkce login"'));
+          console.log(chalk.yellow('Run "my-api-cli auth configure", then "my-api-cli auth login"'));
         } else {
-          console.log(chalk.yellow('💡 Run "auth-pkce login" to authenticate'));
+          console.log(chalk.yellow('Run "my-api-cli auth login" to authenticate'));
         }
       }
     } catch (error) {
@@ -233,7 +233,7 @@ export class Commands {
       const token = await this.authManager.getAccessToken();
       if (!token) {
         console.error(chalk.red('❌ No access token found'));
-        console.log(chalk.yellow('💡 Run "auth-pkce login" to authenticate'));
+        console.log(chalk.yellow('Run "my-api-cli auth login" to authenticate'));
         return;
       }
 

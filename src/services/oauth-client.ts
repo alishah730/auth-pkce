@@ -1,348 +1,323 @@
-import axios from 'axios';
-import express from 'express';
+import { timingSafeEqual } from 'node:crypto';
+import { createServer, Server } from 'node:http';
 import open from 'open';
-import { Server } from 'http';
-import { URLSearchParams } from 'url';
-import { TokenResponse, UserInfo, PKCEChallenge, AuthState, CLIConfig } from '../types';
+import { CLIConfig, PKCEChallenge, TokenResponse, UserInfo } from '../types';
+import { validateLoopbackRedirectUri } from '../utils/errors';
 import { generatePKCEChallenge, generateState } from '../utils/crypto';
-import { OIDCDiscoveryService } from './oidc-discovery';
 import logger from '../utils/logger';
+import { OIDCDiscoveryService } from './oidc-discovery';
+
+export interface OAuthClientOptions {
+  callbackTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  openBrowser?: (url: string) => Promise<void>;
+}
+
+interface OAuthErrorPayload {
+  error?: string;
+  error_description?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function errorMessage(payload: unknown, fallback: string): string {
+  if (!isRecord(payload)) {
+    return fallback;
+  }
+
+  const oauthError = payload as OAuthErrorPayload;
+  return oauthError.error_description || oauthError.error || fallback;
+}
+
+function statesMatch(expected: string, received: string): boolean {
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(received);
+  return expectedBuffer.length === receivedBuffer.length && timingSafeEqual(expectedBuffer, receivedBuffer);
+}
 
 export class OAuthClient {
-  private config: CLIConfig;
-  private authState: Map<string, AuthState> = new Map();
+  private readonly config: CLIConfig;
+  private readonly callbackTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
+  private readonly openBrowser: (url: string) => Promise<void>;
 
-  constructor(config: CLIConfig) {
-    this.config = config;
+  public constructor(config: CLIConfig, options: OAuthClientOptions = {}) {
+    this.config = { ...config };
+    this.callbackTimeoutMs = options.callbackTimeoutMs ?? 300_000;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    this.openBrowser = options.openBrowser ?? (async (url: string): Promise<void> => {
+      await open(url);
+    });
   }
 
-  /**
-   * Start the OAuth 2.0 PKCE authorization flow
-   */
   public async authorize(): Promise<TokenResponse> {
-    try {
-      // Discover endpoints if not already configured
-      await this.ensureEndpoints();
+    await this.ensureEndpoints();
 
-      const pkceChallenge = generatePKCEChallenge();
-      const state = generateState();
-      const redirectUri = this.config.redirectUri;
+    const pkce = generatePKCEChallenge();
+    const state = generateState();
+    const authorizationUrl = this.buildAuthorizationUrl(pkce, state, this.config.redirectUri);
+    logger.info('Starting OAuth authorization flow');
 
-      // Store auth state for callback validation
-      this.authState.set(state, {
-        state,
-        codeVerifier: pkceChallenge.codeVerifier,
-        redirectUri
-      });
+    const authorizationCode = await this.handleAuthorizationCallback(
+      this.config.redirectUri,
+      state,
+      authorizationUrl
+    );
 
-      // Build authorization URL
-      const authUrl = this.buildAuthorizationUrl(pkceChallenge, state, redirectUri);
-      
-      logger.info('Starting OAuth authorization flow', { authUrl });
-
-      // Start local server to handle callback
-      const authorizationCode = await this.handleAuthorizationCallback(redirectUri, pkceChallenge, state);
-
-      // Exchange authorization code for tokens
-      const tokens = await this.exchangeCodeForTokens(
-        authorizationCode,
-        pkceChallenge.codeVerifier,
-        redirectUri
-      );
-
-      // Clean up auth state
-      this.authState.delete(state);
-
-      return tokens;
-    } catch (error) {
-      logger.error('OAuth authorization failed', { error });
-      throw error;
-    }
+    return this.exchangeCodeForTokens(authorizationCode, pkce.codeVerifier, this.config.redirectUri);
   }
 
-  /**
-   * Refresh access token using refresh token
-   */
   public async refreshToken(refreshToken: string): Promise<TokenResponse> {
-    try {
-      await this.ensureEndpoints();
+    await this.ensureEndpoints();
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: this.config.clientId,
+    });
 
-      const params = new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: this.config.clientId
-      });
-
-      const response = await axios.post<TokenResponse>(
-        this.config.tokenEndpoint!,
-        params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': 'auth-pkce-cli/1.0.0'
-          },
-          timeout: 30000
-        }
-      );
-
-      logger.info('Token refreshed successfully');
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const errorData = error.response?.data;
-        throw new Error(`Token refresh failed: ${errorData?.error_description || error.message}`);
-      }
-      throw error;
-    }
+    return this.postForm<TokenResponse>(this.config.tokenEndpoint!, params, 'Token refresh failed');
   }
 
-  /**
-   * Get user information using access token
-   */
   public async getUserInfo(accessToken: string): Promise<UserInfo> {
-    try {
-      await this.ensureEndpoints();
-
-      if (!this.config.userinfoEndpoint) {
-        throw new Error('Userinfo endpoint not configured');
-      }
-
-      const response = await axios.get<UserInfo>(
-        this.config.userinfoEndpoint,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Accept': 'application/json',
-            'User-Agent': 'auth-pkce-cli/1.0.0'
-          },
-          timeout: 10000
-        }
-      );
-
-      logger.info('User info retrieved successfully');
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          throw new Error('Access token expired or invalid');
-        }
-        throw new Error(`Failed to get user info: ${error.message}`);
-      }
-      throw error;
+    await this.ensureEndpoints();
+    if (!this.config.userinfoEndpoint) {
+      throw new Error('Userinfo endpoint is not advertised by the provider');
     }
+
+    const payload = await this.requestJson(this.config.userinfoEndpoint, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'User-Agent': 'auth-pkce',
+      },
+    }, 'Failed to get user info');
+
+    if (!isRecord(payload) || typeof payload.sub !== 'string') {
+      throw new Error('Userinfo response is missing the required sub claim');
+    }
+    return payload as UserInfo;
   }
 
-  /**
-   * Revoke tokens (logout)
-   */
-  public async revokeToken(token: string, tokenTypeHint: 'access_token' | 'refresh_token' = 'access_token'): Promise<void> {
+  public async revokeToken(
+    token: string,
+    tokenTypeHint: 'access_token' | 'refresh_token' = 'access_token'
+  ): Promise<void> {
     try {
       await this.ensureEndpoints();
-
-      // Try to use revocation endpoint if available
-      const revocationEndpoint = this.config.endSessionEndpoint;
-      if (!revocationEndpoint) {
-        logger.warn('No revocation endpoint available, tokens will remain valid until expiry');
+      if (!this.config.revocationEndpoint) {
+        logger.warn('Provider does not advertise a token revocation endpoint');
         return;
       }
 
       const params = new URLSearchParams({
         token,
         token_type_hint: tokenTypeHint,
-        client_id: this.config.clientId
+        client_id: this.config.clientId,
       });
-
-      await axios.post(
-        revocationEndpoint,
-        params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'auth-pkce-cli/1.0.0'
-          },
-          timeout: 10000
-        }
-      );
-
-      logger.info('Token revoked successfully');
+      await this.postForm(this.config.revocationEndpoint, params, 'Token revocation failed');
     } catch (error) {
-      logger.warn('Token revocation failed, but continuing with logout', { error });
-      // Don't throw error as local logout should still work
+      logger.warn('Token revocation failed; local logout will continue', { error });
     }
   }
 
-  /**
-   * Ensure OAuth endpoints are discovered and configured
-   */
   private async ensureEndpoints(): Promise<void> {
-    if (!this.config.authorizationEndpoint || !this.config.tokenEndpoint) {
-      const oidcConfig = await OIDCDiscoveryService.discover(this.config.baseUrl);
-      
-      this.config.authorizationEndpoint = oidcConfig.authorization_endpoint;
-      this.config.tokenEndpoint = oidcConfig.token_endpoint;
-      this.config.userinfoEndpoint = oidcConfig.userinfo_endpoint;
-      this.config.endSessionEndpoint = oidcConfig.end_session_endpoint;
+    if (this.config.authorizationEndpoint && this.config.tokenEndpoint) {
+      return;
+    }
 
-      // Validate PKCE support
-      if (!OIDCDiscoveryService.validatePKCESupport(oidcConfig)) {
-        logger.warn('PKCE S256 method not explicitly supported by the provider');
-      }
+    const discovered = await OIDCDiscoveryService.discover(this.config.baseUrl);
+    this.config.authorizationEndpoint = discovered.authorization_endpoint;
+    this.config.tokenEndpoint = discovered.token_endpoint;
+    this.config.userinfoEndpoint = discovered.userinfo_endpoint;
+    this.config.revocationEndpoint = discovered.revocation_endpoint;
+
+    if (!OIDCDiscoveryService.validatePKCESupport(discovered)) {
+      logger.warn('Provider metadata does not explicitly advertise PKCE S256 support');
     }
   }
 
-  /**
-   * Build OAuth authorization URL
-   */
-  private buildAuthorizationUrl(pkceChallenge: PKCEChallenge, state: string, redirectUri: string): string {
+  private buildAuthorizationUrl(
+    pkce: PKCEChallenge,
+    state: string,
+    redirectUri: string
+  ): string {
+    if (!this.config.authorizationEndpoint) {
+      throw new Error('Authorization endpoint is not configured');
+    }
+
+    const url = new URL(this.config.authorizationEndpoint);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.clientId,
       redirect_uri: redirectUri,
       scope: this.config.scope,
       state,
-      code_challenge: pkceChallenge.codeChallenge,
-      code_challenge_method: pkceChallenge.codeChallengeMethod,
-      external: 'false'
+      code_challenge: pkce.codeChallenge,
+      code_challenge_method: pkce.codeChallengeMethod,
     });
-
-    return `${this.config.authorizationEndpoint}?${params.toString()}`;
+    params.forEach((value, key) => url.searchParams.set(key, value));
+    return url.toString();
   }
 
-  /**
-   * Handle OAuth callback and extract authorization code
-   */
-  private async handleAuthorizationCallback(redirectUri: string, pkceChallenge: PKCEChallenge, state: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const url = new URL(redirectUri);
-      const port = parseInt(url.port) || 8080;
-      
-      const app = express();
-      let server: Server;
+  private async handleAuthorizationCallback(
+    redirectUri: string,
+    expectedState: string,
+    authorizationUrl: string
+  ): Promise<string> {
+    const redirect = validateLoopbackRedirectUri(redirectUri);
+    const port = Number.parseInt(redirect.port, 10);
+    if (!Number.isInteger(port) || port <= 0) {
+      throw new Error('Redirect URI must include an explicit loopback port');
+    }
 
-      // Handle callback at the root path since redirect URI is http://localhost:4200
-      app.get('/', (req, res) => {
-        const { code, state, error, error_description } = req.query;
+    const host = redirect.hostname.replace(/^\[(.*)\]$/, '$1');
+    const callbackPath = redirect.pathname || '/';
 
+    return new Promise<string>((resolve, reject) => {
+      let settled = false;
+      let timeout: NodeJS.Timeout | undefined;
+
+      const finish = (server: Server, error?: Error, code?: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        server.close();
         if (error) {
-          const errorMsg = `OAuth error: ${error}${error_description ? ` - ${error_description}` : ''}`;
-          logger.error('OAuth callback error', { error, error_description });
-          res.status(400).send(`<h1>Authentication Failed</h1><p>${errorMsg}</p>`);
-          server.close();
-          reject(new Error(errorMsg));
-          return;
+          reject(error);
+        } else if (code) {
+          resolve(code);
+        } else {
+          reject(new Error('Authentication callback completed without an authorization code'));
         }
-
-        if (!code || !state) {
-          const errorMsg = 'Missing authorization code or state parameter';
-          logger.error('OAuth callback missing parameters', { code: !!code, state: !!state });
-          res.status(400).send(`<h1>Authentication Failed</h1><p>${errorMsg}</p>`);
-          server.close();
-          reject(new Error(errorMsg));
-          return;
-        }
-
-        // Validate state parameter
-        const authState = this.authState.get(state as string);
-        if (!authState) {
-          const errorMsg = 'Invalid state parameter';
-          logger.error('OAuth callback invalid state', { state });
-          res.status(400).send(`<h1>Authentication Failed</h1><p>${errorMsg}</p>`);
-          server.close();
-          reject(new Error(errorMsg));
-          return;
-        }
-
-        res.send(`
-          <h1>Authentication Successful!</h1>
-          <p>You can now close this window and return to the CLI.</p>
-          <script>setTimeout(() => window.close(), 3000);</script>
-        `);
-
-        server.close(() => {
-          logger.debug('Callback server closed successfully');
-        });
-        resolve(code as string);
-      });
-
-      server = app.listen(port, () => {
-        logger.info(`Callback server listening on port ${port}`);
-        
-        // Store auth state for validation
-        this.authState.set(state, {
-          state,
-          codeVerifier: pkceChallenge.codeVerifier,
-          redirectUri
-        });
-
-        const authUrl = this.buildAuthorizationUrl(pkceChallenge, state, redirectUri);
-        
-        open(authUrl).catch(err => {
-          logger.warn('Failed to open browser automatically', { error: err });
-          console.log(`\nPlease open the following URL in your browser:\n${authUrl}\n`);
-        });
-      });
-
-      // Timeout after 5 minutes
-      const timeoutId = setTimeout(() => {
-        server.close(() => {
-          logger.debug('Callback server closed due to timeout');
-        });
-        reject(new Error('Authentication timeout - no callback received within 5 minutes'));
-      }, 300000);
-
-      // Clear timeout on successful completion
-      const originalResolve = resolve;
-      resolve = (value: string | PromiseLike<string>): void => {
-        clearTimeout(timeoutId);
-        originalResolve(value);
       };
+
+      const server = createServer((request, response) => {
+        const requestUrl = new URL(request.url || '/', redirectUri);
+        response.setHeader('Connection', 'close');
+
+        if (requestUrl.pathname !== callbackPath) {
+          response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          response.end('Not found');
+          return;
+        }
+
+        const oauthError = requestUrl.searchParams.get('error');
+        if (oauthError) {
+          const description = requestUrl.searchParams.get('error_description');
+          const message = `OAuth error: ${oauthError}${description ? ` - ${description}` : ''}`;
+          response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          response.end('Authentication failed. Return to the CLI for details.');
+          finish(server, new Error(message));
+          return;
+        }
+
+        const code = requestUrl.searchParams.get('code');
+        const receivedState = requestUrl.searchParams.get('state');
+        if (!code || !receivedState) {
+          response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          response.end('Authentication failed: missing code or state.');
+          finish(server, new Error('OAuth callback is missing the authorization code or state'));
+          return;
+        }
+
+        if (!statesMatch(expectedState, receivedState)) {
+          response.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+          response.end('Authentication failed: invalid state.');
+          finish(server, new Error('OAuth callback state validation failed'));
+          return;
+        }
+
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        response.end(
+          '<!doctype html><title>Authentication complete</title>' +
+          '<h1>Authentication complete</h1><p>You can close this window and return to the CLI.</p>'
+        );
+        finish(server, undefined, code);
+      });
+
+      server.once('error', (error) => finish(server, error));
+      server.listen(port, host, () => {
+        timeout = setTimeout(() => {
+          finish(server, new Error('Authentication timed out while waiting for the browser callback'));
+        }, this.callbackTimeoutMs);
+
+        this.openBrowser(authorizationUrl).catch((error: unknown) => {
+          logger.warn('Failed to open the browser automatically', { error });
+          console.log(`Open this URL in your browser:\n${authorizationUrl}`);
+        });
+      });
     });
   }
 
-  /**
-   * Exchange authorization code for tokens
-   */
   private async exchangeCodeForTokens(
     code: string,
     codeVerifier: string,
     redirectUri: string
   ): Promise<TokenResponse> {
-    try {
-      const params = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-        client_id: this.config.clientId,
-        code_verifier: codeVerifier,
-      });
-
-      // Add audience parameter if configured for WSO2 token exchange
-      if (this.config.audience) {
-        params.append('audience', this.config.audience);
-      }
-
-      const response = await axios.post<TokenResponse>(
-        this.config.tokenEndpoint!,
-        params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': 'auth-pkce-cli/1.0.0'
-          },
-          timeout: 30000
-        }
-      );
-
-      logger.info('Authorization code exchanged for tokens successfully');
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const errorData = error.response?.data;
-        throw new Error(`Token exchange failed: ${errorData?.error_description || error.message}`);
-      }
-      throw error;
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: this.config.clientId,
+      code_verifier: codeVerifier,
+    });
+    if (this.config.audience) {
+      params.set('audience', this.config.audience);
     }
+
+    return this.postForm<TokenResponse>(this.config.tokenEndpoint!, params, 'Token exchange failed');
+  }
+
+  private async postForm<T = unknown>(
+    url: string,
+    params: URLSearchParams,
+    failureMessage: string
+  ): Promise<T> {
+    return this.requestJson(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'auth-pkce',
+      },
+      body: params.toString(),
+    }, failureMessage) as Promise<T>;
+  }
+
+  private async requestJson(
+    url: string,
+    init: RequestInit,
+    failureMessage: string
+  ): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
+      });
+    } catch (error) {
+      throw new Error(`${failureMessage}: network request failed`, { cause: error });
+    }
+
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text) as unknown;
+      } catch (error) {
+        throw new Error(`${failureMessage}: server returned invalid JSON`, { cause: error });
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`${failureMessage}: ${errorMessage(payload, `HTTP ${response.status}`)}`);
+    }
+    return payload;
   }
 }

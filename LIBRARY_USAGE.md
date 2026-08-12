@@ -1,340 +1,136 @@
-# auth-pkce Library Usage Guide
+# Library usage
 
-This document provides a comprehensive guide for using auth-pkce as a library in your Node.js CLI applications.
+## Commander integration
 
-## Overview
-
-The auth-pkce library allows you to easily add OAuth 2.0 PKCE authentication to your CLI applications. Your users can authenticate once and use the same credentials across multiple CLIs that use this library.
-
-## Installation
-
-```bash
-npm install auth-pkce
-```
-
-## Quick Start
-
-### 1. Simple Integration
-
-Add authentication to your CLI with one line:
-
-```typescript
-import { Command } from 'commander';
-import { addAuthToCLI } from 'auth-pkce';
-
-const program = new Command()
-  .name('my-cli')
-  .version('1.0.0');
-
-addAuthToCLI(program, { cliName: 'my-cli' });
-program.parse();
-```
-
-**Result**: Your CLI now has these commands:
-- `my-cli login` - Authenticate
-- `my-cli logout` - Sign out
-- `my-cli whoami` - Show user info
-- `my-cli auth configure` - Setup OAuth
-- `my-cli auth status` - Check auth status
-- `my-cli auth refresh` - Refresh tokens
-- `my-cli auth token` - Show access token
-
-### 2. Full Control Integration
+`AuthPKCELibrary` is the simplest integration for a CLI that already uses Commander:
 
 ```typescript
 import { Command } from 'commander';
 import { AuthPKCELibrary } from 'auth-pkce';
 
-const program = new Command();
-const auth = new AuthPKCELibrary({
-  cliName: 'my-cli',
-  version: '1.0.0'
-});
+const program = new Command().name('acme');
+const auth = new AuthPKCELibrary({ cliName: 'acme' });
 
-// Add auth commands
 auth.addAuthCommands(program);
 
-// Add protected commands
-program
-  .command('deploy')
-  .action(async () => {
-    try {
-      await auth.status(); // Verify authentication
-      console.log('Deploying...');
-    } catch {
-      console.log('Please login first: my-cli login');
-    }
-  });
+program.command('projects').action(async () => {
+  const token = await auth.getAccessToken();
+  // Use token in the API request. Do not print it.
+});
+
+await program.parseAsync();
 ```
 
-## API Reference
+Use `getAccessToken()` or `isAuthenticated()` to gate protected work. `status()` prints status for a human; it is not an authorization guard.
 
-### AuthPKCELibrary Class
-
-```typescript
-class AuthPKCELibrary {
-  constructor(options?: AuthPKCELibraryOptions)
-  
-  // Add auth commands to existing CLI program
-  addAuthCommands(program: Command): void
-  
-  // Create new CLI program with auth commands
-  createCLI(): Command
-  
-  // Direct API methods
-  async configure(options?: { baseUrl?: string }): Promise<void>
-  async login(): Promise<void>
-  async logout(): Promise<void>
-  async whoami(): Promise<void>
-  async refresh(): Promise<void>
-  async status(): Promise<void>
-  async token(): Promise<void>
-  
-  // Token extraction methods for API calls
-  async getAccessToken(): Promise<string>
-  async getBearerToken(): Promise<string>
-}
-```
-
-### Options Interface
+### Options
 
 ```typescript
 interface AuthPKCELibraryOptions {
-  cliName?: string;         // CLI name for branding (default: 'auth-pkce')
-  version?: string;         // CLI version (default: '1.0.0')
-  suppressColors?: boolean; // Disable colored output (default: false)
-  silent?: boolean;         // Suppress all output (default: false)
+  cliName?: string;
+  version?: string;
+  commandGroup?: string | false; // default: "auth"
+  configDir?: string;            // default: AUTH_PKCE_CONFIG_DIR or ~/.auth-pkce
+  autoRefresh?: boolean;         // default: true
 }
 ```
 
-### Utility Functions
+Use a per-CLI `configDir` when different tools have different OAuth clients or issuers. Omit it when several trusted tools intentionally share one login.
+
+### Direct methods
 
 ```typescript
-// Factory function for quick setup
-function createAuthPKCE(options?: AuthPKCELibraryOptions): AuthPKCELibrary
+await auth.configure();
+await auth.login();
+await auth.logout();
+await auth.whoami();
+await auth.refresh();
+await auth.status();
 
-// Quick helper to add auth to existing CLI
-function addAuthToCLI(program: Command, options?: AuthPKCELibraryOptions): void
+const authenticated = await auth.isAuthenticated();
+const user = await auth.getUserInfo();
+const token = await auth.getAccessToken();
+const authorization = await auth.getBearerToken();
 ```
 
-## Integration Patterns
+Command methods write user-facing output and reject on failure. Token methods do not print secrets.
 
-### 1. Basic CLI with Auth
+## Programmatic API
 
-```typescript
-#!/usr/bin/env node
-import { Command } from 'commander';
-import { addAuthToCLI } from 'auth-pkce';
-
-const program = new Command()
-  .name('my-app')
-  .description('My CLI application')
-  .version('1.0.0');
-
-// Your regular commands
-program
-  .command('hello')
-  .action(() => console.log('Hello World!'));
-
-// Add authentication
-addAuthToCLI(program, { cliName: 'my-app' });
-
-program.parse();
-```
-
-### 2. Protected Commands
+Use `AuthPkceApi` in API clients or service layers:
 
 ```typescript
-import { AuthPKCELibrary } from 'auth-pkce';
+import { AuthPkceApi } from 'auth-pkce';
 
-const auth = new AuthPKCELibrary({ cliName: 'my-app' });
-auth.addAuthCommands(program);
+const auth = new AuthPkceApi({
+  autoRefresh: true,
+  clockSkewSeconds: 30,
+  configDir: process.env.ACME_AUTH_DIR,
+});
 
-async function requireAuth() {
-  try {
-    await auth.status();
-    return true;
-  } catch {
-    console.log('❌ Authentication required. Run: my-app login');
-    process.exit(1);
-  }
+const token = await auth.getAccessToken();
+if (!token) {
+  throw new Error('Authentication required');
 }
 
-program
-  .command('secret')
-  .action(async () => {
-    await requireAuth();
-    console.log('🎉 Secret data access granted!');
-  });
-```
-
-### 3. Programmatic Usage
-
-```typescript
-const auth = new AuthPKCELibrary({ silent: true });
-
-// Use in your service/API code
-class MyService {
-  async initialize() {
-    try {
-      await auth.status();
-      console.log('✅ Authenticated');
-    } catch {
-      console.log('Please authenticate first');
-      await auth.login();
-    }
-  }
-}
-```
-
-### 4. Environment-Specific Configuration
-
-```typescript
-const env = process.env.NODE_ENV || 'production';
-const auth = new AuthPKCELibrary({
-  cliName: `my-app-${env}`,
-  silent: env === 'test'
+const response = await fetch('https://api.example.com/projects', {
+  headers: { Authorization: `Bearer ${token}` },
 });
 ```
 
-## Command Structure
+`getAccessToken()` returns `null` when no usable token is available. If auto-refresh is enabled and a refresh token exists, concurrent refresh requests share one in-flight operation.
 
-After integration, your CLI will have these authentication commands:
+## Non-interactive configuration
 
-| Command | Description | Alias |
-|---------|-------------|-------|
-| `cli auth configure` | Interactive OAuth setup | `cli auth config` |
-| `cli login` | Start authentication flow | - |
-| `cli logout` | Sign out and clear tokens | - |
-| `cli whoami` | Show current user info | - |
-| `cli auth refresh` | Refresh access token | - |
-| `cli auth status` | Show auth status | - |
-| `cli auth token` | Display access token | - |
+Interactive configuration is convenient for end users. Tests, installers, and managed CLIs can save configuration directly:
 
-## Configuration Files
+```typescript
+import { ConfigManager } from 'auth-pkce';
 
-The library manages authentication data in `~/.auth-pkce/`:
+const store = new ConfigManager({ configDir: '/path/owned/by/the/current/user' });
 
-```
-~/.auth-pkce/
-├── config.json    # OAuth configuration
-├── tokens.json    # Access/refresh tokens  
-└── logs/          # Application logs
+await store.saveConfig({
+  baseUrl: 'https://issuer.example.com',
+  clientId: 'public-cli-client',
+  redirectUri: 'http://127.0.0.1:8080/callback',
+  scope: 'openid profile email offline_access',
+  configVersion: '1.0.0',
+});
 ```
 
-**Benefits:**
-- ✅ Shared configuration across all CLIs using auth-pkce
-- ✅ Single authentication for multiple tools
-- ✅ Secure token storage with proper file permissions
-- ✅ Automatic token refresh handling
+Do not ship a client secret in a public CLI. Register the full redirect path with the provider. The provider may allow the loopback port to vary, but this implementation currently uses the explicit configured port.
 
-## Error Handling
+## OAuth client options
+
+Most consumers should use the higher-level classes. `OAuthClient` is exported for custom orchestration and tests:
+
+```typescript
+const client = new OAuthClient(config, {
+  callbackTimeoutMs: 300_000,
+  requestTimeoutMs: 30_000,
+  openBrowser: async (url) => customBrowserLauncher(url),
+});
+```
+
+## Errors and process ownership
+
+The library does not install process-wide error handlers and embedded commands do not terminate the process. Catch errors at your CLI entry point:
 
 ```typescript
 try {
-  await auth.login();
+  await program.parseAsync();
 } catch (error) {
-  if (error.message.includes('configuration')) {
-    console.log('Setup required: my-cli auth configure');
-  } else if (error.message.includes('expired')) {
-    console.log('Token expired: my-cli auth refresh');
-  } else {
-    console.error('Auth error:', error.message);
-  }
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 }
 ```
 
-## Best Practices
+Set `AUTH_PKCE_LOG_LEVEL=debug` (or `info`, `warn`, `error`) for optional diagnostic output on stderr. Tokens are not intentionally logged.
 
-### 1. Check Authentication Before Protected Operations
+## Common mistakes
 
-```typescript
-program
-  .command('deploy')
-  .action(async () => {
-    try {
-      await auth.status();
-      // Proceed with deployment
-    } catch {
-      console.log('Please authenticate first: my-cli login');
-      process.exit(1);
-    }
-  });
-```
-
-### 2. Use Consistent CLI Naming
-
-```typescript
-const auth = new AuthPKCELibrary({
-  cliName: 'my-company-cli', // Consistent across all auth messages
-  version: packageJson.version
-});
-```
-
-### 3. Handle Token Expiration Gracefully
-
-```typescript
-async function ensureValidToken() {
-  try {
-    await auth.status();
-  } catch {
-    console.log('Refreshing expired token...');
-    try {
-      await auth.refresh();
-    } catch {
-      console.log('Please login again: my-cli login');
-      process.exit(1);
-    }
-  }
-}
-```
-
-### 4. Use Silent Mode for Services
-
-```typescript
-// In background services or APIs
-const auth = new AuthPKCELibrary({ 
-  silent: true // Don't clutter service logs
-});
-```
-
-## Examples
-
-See the complete working examples:
-
-- **[`examples/ali-cli/`](examples/ali-cli/)** - Full CLI integration example
-- **[`examples/integration-examples.md`](examples/integration-examples.md)** - Various integration patterns
-- **[`examples/test-library.js`](examples/test-library.js)** - Library export verification
-
-## Migration from Standalone CLI
-
-If you're already using auth-pkce as a standalone CLI, your existing configuration and tokens will work seamlessly with library-integrated CLIs. No migration needed!
-
-## Troubleshooting
-
-### Library Not Found
-```bash
-npm install auth-pkce
-```
-
-### TypeScript Import Issues
-```typescript
-// Use CommonJS import if ES modules cause issues
-const { AuthPKCELibrary } = require('auth-pkce');
-```
-
-### Commands Not Appearing
-Ensure you call `program.parse()` after adding auth commands:
-
-```typescript
-auth.addAuthCommands(program);
-program.parse(); // This must be after addAuthCommands
-```
-
-## Support
-
-- 📚 [Main Documentation](README.md)
-- 🐛 [Issue Tracker](https://github.com/alishah730/auth-pkce/issues)
-- 💬 [Discussions](https://github.com/alishah730/auth-pkce/discussions)
-
-This makes it incredibly easy for Node.js CLI developers to add enterprise-grade OAuth 2.0 PKCE authentication to their applications!
+- Use the issuer URL, not the token URL, as `baseUrl`.
+- Register the exact callback path, for example `/callback`.
+- Use `my-cli auth login` for embedded commands; `auth-pkce login` is the standalone binary.
+- Do not parse an ID token without signature/issuer/audience validation. This library uses UserInfo for user claims.
+- Do not log tokens or include them in shell commands.
