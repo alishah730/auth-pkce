@@ -2,8 +2,8 @@ export class AuthPKCEError extends Error {
   public readonly code: string;
   public readonly statusCode?: number;
 
-  constructor(message: string, code: string, statusCode?: number) {
-    super(message);
+  constructor(message: string, code: string, statusCode?: number, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'AuthPKCEError';
     this.code = code;
     this.statusCode = statusCode;
@@ -36,8 +36,48 @@ export class NetworkError extends AuthPKCEError {
 }
 
 export class ValidationError extends AuthPKCEError {
-  constructor(message: string) {
-    super(message, 'VALIDATION_ERROR');
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, 'VALIDATION_ERROR', undefined, options);
+  }
+}
+
+export function isLoopbackHostname(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === '::1' || hostname === 'localhost';
+}
+
+export function validateIssuerUrl(value: string): URL {
+  const url = parseUrl(value, 'issuer URL');
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new ValidationError('Issuer URL must not include credentials, a query, or a fragment');
+  }
+
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHostname(url.hostname))) {
+    throw new ValidationError('Issuer URL must use HTTPS (HTTP is allowed only for loopback development servers)');
+  }
+
+  return url;
+}
+
+export function validateLoopbackRedirectUri(value: string): URL {
+  const url = parseUrl(value, 'redirect URI');
+
+  if (url.protocol !== 'http:' || !isLoopbackHostname(url.hostname)) {
+    throw new ValidationError('Redirect URI must use HTTP on 127.0.0.1, ::1, or localhost');
+  }
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new ValidationError('Redirect URI must not include credentials, a query, or a fragment');
+  }
+
+  return url;
+}
+
+function parseUrl(value: string, fieldName: string): URL {
+  try {
+    return new URL(value);
+  } catch (error) {
+    throw new ValidationError(`Invalid ${fieldName}: ${value}`, { cause: error });
   }
 }
 
@@ -99,11 +139,7 @@ export class ErrorHandler {
    * Validate URL format
    */
   static validateUrl(url: string, fieldName: string = 'URL'): void {
-    try {
-      new URL(url);
-    } catch {
-      throw new ValidationError(`Invalid ${fieldName}: ${url}`);
-    }
+    parseUrl(url, fieldName);
   }
 
   /**
@@ -119,7 +155,7 @@ export class ErrorHandler {
     }
 
     // Validate URLs
-    this.validateUrl(config.baseUrl as string, 'base URL');
-    this.validateUrl(config.redirectUri as string, 'redirect URI');
+    validateIssuerUrl(config.baseUrl as string);
+    validateLoopbackRedirectUri(config.redirectUri as string);
   }
 }

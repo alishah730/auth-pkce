@@ -2,26 +2,25 @@
   "name": "ali-cli",
   "version": "1.0.0",
   "description": "Example CLI using auth-pkce library",
-  "main": "dist/index.js",
+  "main": "dist/cli.js",
   "bin": {
     "ali": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/cli.ts",
+    "dev": "npm run build && node dist/cli.js",
     "start": "node dist/cli.js"
   },
   "dependencies": {
     "auth-pkce": "file:../..",
-    "commander": "^14.0.1",
+    "commander": "^15.0.0",
     "chalk": "^5.6.2"
   },
   "devDependencies": {
-    "@types/node": "^24.4.0",
-    "typescript": "^5.7.2",
-    "ts-node": "^10.9.2"
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=22.13.0"
   }
 }

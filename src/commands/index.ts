@@ -1,316 +1,215 @@
+import { spawn } from 'node:child_process';
 import chalk from 'chalk';
+import { AuthPkceApi } from '../api';
 import { ConfigManager } from '../config/manager';
 import { OAuthClient } from '../services/oauth-client';
 import { StoredTokens } from '../types';
-import logger from '../utils/logger';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
-const configManager = ConfigManager.getInstance();
-const execAsync = promisify(exec);
+export interface AuthCommandContext {
+  commandName?: string;
+  configManager?: ConfigManager;
+}
 
-/**
- * Configure command - Interactive setup of OAuth configuration
- */
-export async function configureCommand(options: { baseUrl?: string }): Promise<void> {
-  try {
-    console.log(chalk.blue('🔧 Configuring auth-pkce...'));
-    
-    await configManager.configureInteractively(options.baseUrl);
-    
-    console.log(chalk.green('✅ Configuration saved successfully!'));
-    console.log(chalk.gray(`Config saved to: ${require('os').homedir()}/.auth-pkce/config.json`));
-  } catch (error) {
-    console.error(chalk.red('❌ Configuration failed:'), error instanceof Error ? error.message : error);
-    logger.error('Configuration command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
+export interface TokenCommandOptions {
+  show?: boolean;
+}
+
+function resolveContext(context: AuthCommandContext = {}): {
+  commandName: string;
+  configManager: ConfigManager;
+} {
+  return {
+    commandName: context.commandName || 'auth-pkce',
+    configManager: context.configManager || ConfigManager.getInstance(),
+  };
+}
+
+function storeTokenResponse(
+  response: {
+    access_token: string;
+    refresh_token?: string;
+    id_token?: string;
+    expires_in: number;
+    token_type: string;
+    scope?: string;
+  },
+  previous?: StoredTokens
+): StoredTokens {
+  return {
+    accessToken: response.access_token,
+    refreshToken: response.refresh_token || previous?.refreshToken,
+    idToken: response.id_token || previous?.idToken,
+    expiresAt: Date.now() + response.expires_in * 1000,
+    tokenType: response.token_type,
+    scope: response.scope || previous?.scope,
+  };
+}
+
+export async function configureCommand(
+  options: { baseUrl?: string } = {},
+  context: AuthCommandContext = {}
+): Promise<void> {
+  const { configManager } = resolveContext(context);
+  console.log(chalk.blue('Configuring OAuth authentication...'));
+  await configManager.loadConfig();
+  await configManager.configureInteractively(options.baseUrl);
+  console.log(chalk.green('Configuration saved.'));
+  console.log(chalk.gray(configManager.getConfigPath()));
+}
+
+export async function loginCommand(context: AuthCommandContext = {}): Promise<void> {
+  const { commandName, configManager } = resolveContext(context);
+  const config = await configManager.loadConfig();
+  if (!config) {
+    throw new Error(`No configuration found. Run: ${commandName} configure`);
+  }
+
+  console.log(chalk.blue('Opening your browser for authentication...'));
+  const response = await new OAuthClient(config).authorize();
+  await configManager.saveTokens(storeTokenResponse(response));
+  console.log(chalk.green('Authentication successful.'));
+}
+
+export async function logoutCommand(context: AuthCommandContext = {}): Promise<void> {
+  const { configManager } = resolveContext(context);
+  const [config, tokens] = await Promise.all([
+    configManager.loadConfig(),
+    configManager.loadTokens(),
+  ]);
+
+  if (config && tokens) {
+    const client = new OAuthClient(config);
+    await Promise.all([
+      client.revokeToken(tokens.accessToken, 'access_token'),
+      tokens.refreshToken
+        ? client.revokeToken(tokens.refreshToken, 'refresh_token')
+        : Promise.resolve(),
+    ]);
+  }
+
+  await configManager.clearTokens();
+  console.log(chalk.green('Logged out locally.'));
+}
+
+export async function whoamiCommand(context: AuthCommandContext = {}): Promise<void> {
+  const { commandName, configManager } = resolveContext(context);
+  const api = new AuthPkceApi({ configDir: configManager.getConfigDir() });
+  const userInfo = await api.getUserInfo();
+  if (!userInfo) {
+    throw new Error(`User information is unavailable. Run: ${commandName} login`);
+  }
+
+  console.log(chalk.blue('Current user'));
+  console.log(chalk.cyan('User ID:'), userInfo.sub);
+  if (userInfo.name) console.log(chalk.cyan('Name:'), userInfo.name);
+  if (userInfo.email) console.log(chalk.cyan('Email:'), userInfo.email);
+  if (userInfo.preferred_username) {
+    console.log(chalk.cyan('Username:'), userInfo.preferred_username);
   }
 }
 
-/**
- * Login command - Start OAuth PKCE authentication flow
- */
-export async function loginCommand(): Promise<void> {
-  try {
-    console.log(chalk.blue('🔐 Starting authentication...'));
-    
-    const config = await configManager.loadConfig();
-    if (!config) {
-      console.error(chalk.red('❌ No configuration found. Please run "auth-pkce configure" first.'));
-      process.exit(1);
-    }
-
-    const oauthClient = new OAuthClient(config);
-    const tokens = await oauthClient.authorize();
-    
-    // Store tokens securely
-    const storedTokens: StoredTokens = {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      idToken: tokens.id_token,
-      expiresAt: Date.now() + (tokens.expires_in * 1000),
-      tokenType: tokens.token_type,
-      scope: tokens.scope
-    };
-    
-    await configManager.saveTokens(storedTokens);
-    
-    console.log(chalk.green('✅ Authentication successful!'));
-    console.log(chalk.gray(`Token expires in: ${Math.floor(tokens.expires_in / 60)} minutes`));
-    
-    // Ensure clean process exit
-    process.exit(0);
-  } catch (error) {
-    console.error(chalk.red('❌ Authentication failed:'), error instanceof Error ? error.message : error);
-    logger.error('Login command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
+export async function refreshCommand(context: AuthCommandContext = {}): Promise<void> {
+  const { commandName, configManager } = resolveContext(context);
+  const [config, tokens] = await Promise.all([
+    configManager.loadConfig(),
+    configManager.loadTokens(),
+  ]);
+  if (!config || !tokens?.refreshToken) {
+    throw new Error(`No refresh token is available. Run: ${commandName} login`);
   }
+
+  const response = await new OAuthClient(config).refreshToken(tokens.refreshToken);
+  await configManager.saveTokens(storeTokenResponse(response, tokens));
+  console.log(chalk.green('Access token refreshed.'));
 }
 
-/**
- * Logout command - Clear stored tokens and revoke if possible
- */
-export async function logoutCommand(): Promise<void> {
-  try {
-    console.log(chalk.blue('🚪 Logging out...'));
-    
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    if (config && tokens) {
-      // Try to revoke tokens
-      const oauthClient = new OAuthClient(config);
-      if (tokens.accessToken) {
-        await oauthClient.revokeToken(tokens.accessToken, 'access_token');
-      }
-      if (tokens.refreshToken) {
-        await oauthClient.revokeToken(tokens.refreshToken, 'refresh_token');
-      }
-    }
-    
-    // Clear local tokens
-    await configManager.clearTokens();
-    
-    console.log(chalk.green('✅ Logged out successfully!'));
-  } catch (error) {
-    console.error(chalk.red('❌ Logout failed:'), error instanceof Error ? error.message : error);
-    logger.error('Logout command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
+export async function statusCommand(context: AuthCommandContext = {}): Promise<void> {
+  const { commandName, configManager } = resolveContext(context);
+  const [config, tokens] = await Promise.all([
+    configManager.loadConfig(),
+    configManager.loadTokens(),
+  ]);
+
+  if (!config) {
+    console.log(chalk.yellow(`Not configured. Run: ${commandName} configure`));
+    return;
   }
+
+  console.log(chalk.blue('Authentication status'));
+  console.log(chalk.cyan('Issuer:'), config.baseUrl);
+  console.log(chalk.cyan('Client ID:'), config.clientId);
+  console.log(chalk.cyan('Redirect URI:'), config.redirectUri);
+
+  if (!tokens) {
+    console.log(chalk.yellow(`Not logged in. Run: ${commandName} login`));
+    return;
+  }
+
+  if (configManager.isTokenExpired(tokens)) {
+    console.log(chalk.yellow(`Token expired. Run: ${commandName} refresh`));
+    return;
+  }
+
+  const expiresIn = Math.max(0, Math.floor((tokens.expiresAt - Date.now()) / 60_000));
+  console.log(chalk.green('Authenticated'));
+  console.log(chalk.cyan('Expires in:'), `${expiresIn} minute(s)`);
 }
 
-/**
- * Whoami command - Display current user information
- */
-export async function whoamiCommand(): Promise<void> {
-  try {
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    if (!config || !tokens) {
-      console.error(chalk.red('❌ Not authenticated. Please run "auth-pkce login" first.'));
-      process.exit(1);
-    }
-    
-    // Check if token is expired
-    if (configManager.isTokenExpired(tokens)) {
-      console.error(chalk.red('❌ Access token expired. Please run "auth-pkce refresh" or "auth-pkce login".'));
-      process.exit(1);
-    }
-    
-    const oauthClient = new OAuthClient(config);
-    const userInfo = await oauthClient.getUserInfo(tokens.accessToken);
-    
-    console.log(chalk.blue('👤 Current User Information:'));
-    console.log(chalk.white('─'.repeat(40)));
-    console.log(chalk.cyan('User ID:'), userInfo.sub);
-    if (userInfo.name) console.log(chalk.cyan('Name:'), userInfo.name);
-    if (userInfo.email) console.log(chalk.cyan('Email:'), userInfo.email);
-    if (userInfo.preferred_username) console.log(chalk.cyan('Username:'), userInfo.preferred_username);
-    
-    const expiresIn = Math.floor((tokens.expiresAt - Date.now()) / 1000 / 60);
-    console.log(chalk.cyan('Token expires in:'), `${expiresIn} minutes`);
-    
-    if (tokens.scope) {
-      console.log(chalk.cyan('Scopes:'), tokens.scope);
-    }
-  } catch (error) {
-    console.error(chalk.red('❌ Failed to get user info:'), error instanceof Error ? error.message : error);
-    logger.error('Whoami command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
-  }
-}
-
-/**
- * Refresh command - Refresh access token using refresh token
- */
-export async function refreshCommand(): Promise<void> {
-  try {
-    console.log(chalk.blue('🔄 Refreshing access token...'));
-    
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    if (!config || !tokens) {
-      console.error(chalk.red('❌ Not authenticated. Please run "auth-pkce login" first.'));
-      process.exit(1);
-    }
-    
-    if (!tokens.refreshToken) {
-      console.error(chalk.red('❌ No refresh token available. Please run "auth-pkce login" again.'));
-      process.exit(1);
-    }
-    
-    const oauthClient = new OAuthClient(config);
-    const newTokens = await oauthClient.refreshToken(tokens.refreshToken);
-    
-    // Update stored tokens
-    const updatedTokens: StoredTokens = {
-      accessToken: newTokens.access_token,
-      refreshToken: newTokens.refresh_token || tokens.refreshToken, // Keep old refresh token if new one not provided
-      idToken: newTokens.id_token,
-      expiresAt: Date.now() + (newTokens.expires_in * 1000),
-      tokenType: newTokens.token_type,
-      scope: newTokens.scope || tokens.scope
-    };
-    
-    await configManager.saveTokens(updatedTokens);
-    
-    console.log(chalk.green('✅ Access token refreshed successfully!'));
-    console.log(chalk.gray(`New token expires in: ${Math.floor(newTokens.expires_in / 60)} minutes`));
-  } catch (error) {
-    console.error(chalk.red('❌ Token refresh failed:'), error instanceof Error ? error.message : error);
-    console.log(chalk.yellow('💡 Try running "auth-pkce login" to authenticate again.'));
-    logger.error('Refresh command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
-  }
-}
-
-/**
- * Status command - Show current authentication status
- */
-export async function statusCommand(): Promise<void> {
-  try {
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    console.log(chalk.blue('📊 Authentication Status:'));
-    console.log(chalk.white('─'.repeat(40)));
-    
-    if (!config) {
-      console.log(chalk.red('❌ Not configured'));
-      console.log(chalk.yellow('💡 Run "auth-pkce configure" to set up'));
-      return;
-    }
-    
-    console.log(chalk.cyan('Configuration:'), chalk.green('✅ Found'));
-    console.log(chalk.cyan('Base URL:'), config.baseUrl);
-    console.log(chalk.cyan('Client ID:'), config.clientId);
-    console.log(chalk.cyan('Redirect URI:'), config.redirectUri);
-    console.log(chalk.cyan('Scopes:'), config.scope);
-    
-    if (!tokens) {
-      console.log(chalk.cyan('Authentication:'), chalk.red('❌ Not logged in'));
-      console.log(chalk.yellow('💡 Run "auth-pkce login" to authenticate'));
-      return;
-    }
-    
-    const isExpired = configManager.isTokenExpired(tokens);
-    const expiresIn = Math.floor((tokens.expiresAt - Date.now()) / 1000 / 60);
-    
-    if (isExpired) {
-      console.log(chalk.cyan('Authentication:'), chalk.red('❌ Token expired'));
-      console.log(chalk.yellow('💡 Run "auth-pkce refresh" or "auth-pkce login"'));
-    } else {
-      console.log(chalk.cyan('Authentication:'), chalk.green('✅ Active'));
-      console.log(chalk.cyan('Expires in:'), `${expiresIn} minutes`);
-    }
-    
-    console.log(chalk.cyan('Has refresh token:'), tokens.refreshToken ? chalk.green('✅ Yes') : chalk.red('❌ No'));
-  } catch (error) {
-    console.error(chalk.red('❌ Failed to get status:'), error instanceof Error ? error.message : error);
-    logger.error('Status command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
-  }
-}
-
-/**
- * Token command - Display access token and copy to clipboard
- */
-export async function tokenCommand(): Promise<void> {
-  try {
-    const config = await configManager.loadConfig();
-    const tokens = await configManager.loadTokens();
-    
-    if (!config || !tokens) {
-      console.error(chalk.red('❌ Not authenticated. Please run "auth-pkce login" first.'));
-      process.exit(1);
-    }
-    
-    // Check if token is expired
-    if (configManager.isTokenExpired(tokens)) {
-      console.error(chalk.red('❌ Access token expired. Please run "auth-pkce refresh" or "auth-pkce login".'));
-      process.exit(1);
-    }
-    
-    console.log(chalk.blue('🔑 Access Token:'));
-    console.log(chalk.white('─'.repeat(40)));
-    console.log(chalk.green(tokens.accessToken));
-    
-    const expiresIn = Math.floor((tokens.expiresAt - Date.now()) / 1000 / 60);
-    console.log(chalk.gray(`\nExpires in: ${expiresIn} minutes`));
-    
-    // Copy to clipboard
-    try {
-      // Detect platform and use appropriate clipboard command
-      const platform = process.platform;
-      
-      if (platform === 'darwin') {
-        // macOS - use printf to avoid newline and quotes
-        await execAsync(`printf '%s' "${tokens.accessToken}" | pbcopy`);
-      } else if (platform === 'win32') {
-        // Windows - write to file then use clip to avoid quote issues
-        const { writeFile, unlink } = await import('fs/promises');
-        const tmpFile = `${process.env.TEMP || process.env.TMP || '.'}/.auth-pkce-token-tmp`;
-        try {
-          await writeFile(tmpFile, tokens.accessToken, 'utf8');
-          await execAsync(`type "${tmpFile}" | clip`);
-          await unlink(tmpFile);
-        } catch (err) {
-          // Try to clean up temp file even if clip fails
-          try { 
-            await unlink(tmpFile); 
-          } catch {
-            // Ignore cleanup errors
-          }
-          throw err;
-        }
+function pipeToProcess(command: string, args: string[], value: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve();
       } else {
-        // Linux/Unix - try xclip first, then xsel
-        try {
-          await execAsync('which xclip');
-          await execAsync(`printf '%s' "${tokens.accessToken}" | xclip -selection clipboard`);
-        } catch {
-          try {
-            await execAsync('which xsel');
-            await execAsync(`printf '%s' "${tokens.accessToken}" | xsel --clipboard --input`);
-          } catch {
-            console.log(chalk.yellow('📋 Clipboard not available. Token displayed above.'));
-            return;
-          }
-        }
+        reject(new Error(`${command} exited with code ${String(code)}`));
       }
-      
-      console.log(chalk.green('📋 Access token copied to clipboard!'));
-      
-    } catch (error) {
-      console.log(chalk.yellow('📋 Could not copy to clipboard. Token displayed above.'));
-      logger.warn('Clipboard copy failed', { error });
+    });
+    child.stdin.on('error', () => {
+      // The child process error/exit handlers above report command failures.
+    });
+    child.stdin.end(value);
+  });
+}
+
+async function copyToClipboard(value: string): Promise<boolean> {
+  try {
+    if (process.platform === 'darwin') {
+      await pipeToProcess('pbcopy', [], value);
+    } else if (process.platform === 'win32') {
+      await pipeToProcess('clip', [], value);
+    } else {
+      try {
+        await pipeToProcess('xclip', ['-selection', 'clipboard'], value);
+      } catch {
+        await pipeToProcess('xsel', ['--clipboard', '--input'], value);
+      }
     }
-    
-  } catch (error) {
-    console.error(chalk.red('❌ Failed to get access token:'), error instanceof Error ? error.message : error);
-    logger.error('Token command failed', { message: (error instanceof Error ? error.message : String(error)), code: (error && (error as any).code) ? (error as any).code : undefined });
-    process.exit(1);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function tokenCommand(
+  options: TokenCommandOptions = {},
+  context: AuthCommandContext = {}
+): Promise<void> {
+  const { commandName, configManager } = resolveContext(context);
+  const api = new AuthPkceApi({ configDir: configManager.getConfigDir() });
+  const token = await api.getAccessToken();
+  if (!token) {
+    throw new Error(`No valid access token is available. Run: ${commandName} login`);
+  }
+
+  if (options.show) {
+    console.log(token);
+  }
+
+  if (await copyToClipboard(token)) {
+    console.log(chalk.green('Access token copied to the clipboard.'));
+  } else if (!options.show) {
+    console.log(chalk.yellow(`Clipboard unavailable. Re-run with: ${commandName} token --show`));
   }
 }

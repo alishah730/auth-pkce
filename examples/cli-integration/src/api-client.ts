@@ -40,7 +40,9 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
-        if (error.response?.status === 401) {
+        const requestConfig = error.config as AxiosRequestConfig & { _authRetry?: boolean };
+        if (error.response?.status === 401 && !requestConfig._authRetry) {
+          requestConfig._authRetry = true;
           console.log('Authentication failed, attempting token refresh...');
           
           const refreshed = await this.authManager.refreshToken();
@@ -48,12 +50,13 @@ export class ApiClient {
             // Retry the original request with new token
             const token = await this.authManager.getAccessToken();
             if (token) {
-              error.config.headers.Authorization = `Bearer ${token}`;
-              return this.client.request(error.config);
+              requestConfig.headers = requestConfig.headers || {};
+              requestConfig.headers.Authorization = `Bearer ${token}`;
+              return this.client.request(requestConfig);
             }
           }
           
-          console.error('Authentication required. Please run: auth-pkce login');
+          console.error('Authentication required. Run: my-api-cli auth login');
         }
         
         return Promise.reject(error);

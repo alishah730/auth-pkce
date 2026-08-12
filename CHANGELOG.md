@@ -1,50 +1,32 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes are documented here. The project is pre-1.0; public APIs may still evolve between minor releases.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [1.0.0] - 2024-01-01
+## Unreleased
 
 ### Added
-- Initial release of auth-pkce CLI tool
-- OAuth 2.0 PKCE (Proof Key for Code Exchange) authentication flow
-- OpenID Connect discovery support
-- Interactive configuration management
-- Secure token storage in user home directory
-- Browser-based authorization flow
-- Token refresh capabilities
-- User information retrieval
-- Comprehensive logging system
-- ASCII art logo and beautiful CLI interface
-- Global npm package installation support
-- TypeScript implementation with full type safety
-- Comprehensive error handling and validation
-- Security features including file permissions and state validation
 
-### Commands
-- `auth-pkce configure` - Interactive OAuth configuration
-- `auth-pkce login` - Start OAuth authentication flow
-- `auth-pkce logout` - Logout and revoke tokens
-- `auth-pkce whoami` - Display current user information
-- `auth-pkce refresh` - Refresh access token
-- `auth-pkce status` - Show authentication status
-- `auth-pkce version` - Display version and ASCII art
-- `auth-pkce --help` - Show help information
+- Explicit npm exports and a TypeScript declaration entry point.
+- Configurable credential storage through `configDir` and `AUTH_PKCE_CONFIG_DIR`.
+- Built-artifact tests for PKCE, storage, package exports, discovery, and the loopback OAuth flow.
+- Verified local `ali-cli` and API CLI integration examples.
 
-### Security
-- PKCE implementation with SHA256 code challenge
-- Cryptographically secure random string generation
-- State parameter for CSRF protection
-- Restrictive file permissions (600) for sensitive data
-- Token expiration validation
-- Secure token revocation on logout
+### Changed
 
-### Developer Experience
-- TypeScript with strict type checking
-- ESLint configuration for code quality
-- Jest testing framework setup
-- Comprehensive documentation
-- Industry-standard project structure
-- npm publishing configuration
+- Embedded commands use a collision-safe `auth` group and return errors to the host process.
+- Discovery, issuer matching, callback routing, and revocation use their standard endpoints.
+- Programmatic token access refreshes automatically and coalesces concurrent refreshes.
+- Runtime dependencies are reduced to Commander, Chalk, Inquirer, and `open`; Node 22.13+ provides HTTP, fetch, filesystem, crypto, and tests.
+- Token output is copied without shell interpolation and printed only with `--show`.
+
+### Fixed
+
+- Root build, tests, lint, npm packing, and both example builds.
+- Missing `AuthPKCELibrary` export that prevented local example compilation.
+- Incorrect callback path handling and non-standard discovery URL.
+- Incorrect use of an OIDC logout endpoint for token revocation.
+- Documentation claims that tokens were encrypted or that unsupported behavior was implemented.
+
+## 0.0.x
+
+- Initial OAuth 2.0 Authorization Code + PKCE CLI prototype, interactive configuration, token refresh, UserInfo, and library APIs.

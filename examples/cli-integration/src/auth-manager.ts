@@ -1,106 +1,59 @@
-import { AuthPkceApi, getAccessToken, isAuthenticated, getTokenInfo, getAuthStatus } from 'auth-pkce';
+import {
+  AuthPkceApi,
+  AuthPKCELibrary,
+  AuthStatus,
+  StoredTokens,
+} from 'auth-pkce';
 
 export class AuthManager {
-  private authApi: AuthPkceApi;
+  private readonly authApi = new AuthPkceApi({ autoRefresh: true });
+  private readonly authCommands = new AuthPKCELibrary({ cliName: 'my-api-cli' });
 
-  constructor() {
-    // Enable automatic token refresh by default
-    this.authApi = new AuthPkceApi({ autoRefresh: true });
+  public async isAuthenticated(): Promise<boolean> {
+    return this.authApi.isAuthenticated();
   }
 
-  /**
-   * Check if user is authenticated with auth-pkce
-   */
-  async isAuthenticated(): Promise<boolean> {
-    return await this.authApi.isAuthenticated();
+  public async getAccessToken(): Promise<string | null> {
+    return this.authApi.getAccessToken();
   }
 
-  /**
-   * Get current access token from auth-pkce (with auto-refresh)
-   */
-  async getAccessToken(): Promise<string | null> {
-    return await this.authApi.getAccessToken();
+  public async getTokenInfo(): Promise<StoredTokens | null> {
+    return this.authApi.getTokenInfo();
   }
 
-  /**
-   * Get token info including expiration
-   */
-  async getTokenInfo(): Promise<any | null> {
-    return await this.authApi.getTokenInfo();
+  public async getAuthStatus(): Promise<AuthStatus> {
+    return this.authApi.getAuthStatus();
   }
 
-  /**
-   * Get authentication status summary
-   */
-  async getAuthStatus(): Promise<any> {
-    return await this.authApi.getAuthStatus();
+  public async refreshToken(): Promise<boolean> {
+    return this.authApi.refreshToken();
   }
 
-  /**
-   * Refresh token using auth-pkce programmatically
-   */
-  async refreshToken(): Promise<boolean> {
-    return await this.authApi.refreshToken();
+  public async hasConfiguration(): Promise<boolean> {
+    return this.authApi.hasConfiguration();
   }
 
-  /**
-   * Check if auth-pkce is configured
-   */
-  async hasConfiguration(): Promise<boolean> {
-    return await this.authApi.hasConfiguration();
-  }
+  public async promptAuthentication(): Promise<boolean> {
+    if (!await this.hasConfiguration()) {
+      console.log('Authentication is not configured. Run: my-api-cli auth configure');
+      return false;
+    }
 
-  /**
-   * Prompt user to authenticate with auth-pkce
-   */
-  async promptAuthentication(): Promise<boolean> {
     try {
-      const hasConfig = await this.hasConfiguration();
-      
-      if (!hasConfig) {
-        console.log('auth-pkce is not configured.');
-        console.log('Please run: auth-pkce configure');
-        return false;
-      }
-
-      console.log('Authentication required. Please authenticate with auth-pkce...');
-      console.log('Run: auth-pkce login');
-      
-      // Wait for user to authenticate
-      const readline = require('readline');
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-      
-      return new Promise((resolve) => {
-        rl.question('Press Enter after you have authenticated with auth-pkce...', async () => {
-          rl.close();
-          const isAuth = await this.isAuthenticated();
-          resolve(isAuth);
-        });
-      });
+      await this.authCommands.login();
+      return this.isAuthenticated();
     } catch (error) {
-      console.error('Authentication prompt failed:', error);
+      console.error('Authentication failed:', error instanceof Error ? error.message : String(error));
       return false;
     }
   }
 
-  /**
-   * Ensure user is authenticated, prompt if not
-   */
-  async ensureAuthenticated(): Promise<string | null> {
-    if (await this.isAuthenticated()) {
-      return await this.getAccessToken();
+  public async ensureAuthenticated(): Promise<string | null> {
+    const existingToken = await this.getAccessToken();
+    if (existingToken) {
+      return existingToken;
     }
 
-    console.log('Not authenticated with auth-pkce.');
-    const success = await this.promptAuthentication();
-    
-    if (success) {
-      return await this.getAccessToken();
-    }
-    
-    return null;
+    return await this.promptAuthentication() ? this.getAccessToken() : null;
   }
 }

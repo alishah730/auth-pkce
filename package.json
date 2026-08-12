@@ -1,24 +1,38 @@
 {
   "name": "auth-pkce",
-  "version": "0.0.1",
-  "description": "A Node.js CLI tool and library for OAuth 2.0 PKCE authentication flow",
-  "main": "dist/index.js",
+  "version": "0.0.4",
+  "description": "OAuth 2.0 Authorization Code + PKCE for Node.js CLI applications",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "auth-pkce": "dist/cli.js"
   },
   "files": [
     "dist"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
-    "dev": "ts-node src/cli.ts",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "dev": "npm run build && node dist/cli.js",
     "start": "node dist/cli.js",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
+    "test": "npm run build && node --test test/*.test.cjs",
+    "test:coverage": "npm run build && node --experimental-test-coverage --test test/*.test.cjs",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "type-check": "tsc --noEmit",
-    "prepublishOnly": "npm run build && npm test",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "build:examples": "npm run build && npm run build --prefix examples/ali-cli && npm run build --prefix examples/cli-integration",
+    "smoke": "node examples/test-library.js && node examples/ali-cli/dist/cli.js hello --name Contributor",
+    "package:check": "npm pack --dry-run",
+    "verify": "npm run lint && npm run type-check && npm test && npm run build:examples && npm run smoke && npm run package:check",
+    "prepublishOnly": "npm run lint && npm run type-check && npm test",
     "prepack": "npm run build"
   },
   "keywords": [
@@ -33,32 +47,21 @@
   "author": "Ali Shah <alishah730@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@eslint/js": "^9.38.0",
-    "axios": "^1.16.0",
     "chalk": "^5.6.2",
-    "commander": "^14.0.2",
-    "express": "^5.1.0",
-    "fs-extra": "^11.3.2",
-    "inquirer": "^12.10.0",
-    "open": "^11.0.0",
-    "winston": "^3.18.3"
+    "commander": "^15.0.0",
+    "inquirer": "^14.0.2",
+    "open": "^11.0.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.5",
-    "@types/fs-extra": "^11.0.4",
-    "@types/inquirer": "^9.0.9",
-    "@types/jest": "^30.0.0",
-    "@types/node": "^24.10.1",
-    "@typescript-eslint/eslint-plugin": "^8.46.2",
-    "@typescript-eslint/parser": "^8.46.2",
-    "eslint": "^9.39.1",
-    "jest": "^30.2.0",
-    "ts-jest": "^29.4.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "@typescript-eslint/eslint-plugin": "^8.63.0",
+    "@typescript-eslint/parser": "^8.63.0",
+    "eslint": "^10.6.0",
+    "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
   "repository": {
     "type": "git",
