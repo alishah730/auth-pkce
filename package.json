@@ -50,7 +50,7 @@
     "chalk": "^6.0.0",
     "commander": "^15.0.0",
     "inquirer": "^14.0.2",
-    "open": "^11.0.0"
+    "open": "^11.0.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
